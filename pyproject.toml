@@ -1,0 +1,33 @@
+[project]
+name = "rag-application-pgvector"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "ipykernel",
+    "python-dotenv",
+    "pydantic>=2.0.0",
+    "pydantic-ai>=0.1.0",
+    "openai>=1.0.0",
+    "pytest>=7.0.0",
+    "pandas>=2.3.1",
+    "timescale-vector>=0.0.7",
+    "instructor>=1.10.0",
+    "docling>=2.44.0",
+    "docling-core>=2.44.1",
+    "rich>=14.1.0",
+    "docling-parse>=4.1.0",
+    "fitz>=0.0.1.dev2",
+    "pypdf>=6.0.0",
+    "frontend>=0.0.3",
+    "pymupdf>=1.26.3",
+    "langchain>=0.3.27",
+    "langchain-community>=0.3.27",
+    "rank-bm25>=0.2.2",
+    "streamlit>=1.48.1",
+    "fastapi>=0.116.1",
+    "psycopg>=3.2.9",
+    "uvicorn>=0.35.0",
+    "psycopg2-binary>=2.9.10",
+]

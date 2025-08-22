@@ -1,2 +1,11 @@
-ipykernel
+pandas
+openai
+psycopg[binary]
+psycopg2-binary
 python-dotenv
+timescale-vector
+instructor
+anthropic
+requests
+fastapi
+uvicorn[standard]
