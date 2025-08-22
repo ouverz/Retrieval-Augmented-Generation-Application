@@ -28,4 +28,4 @@ services:
 
 volumes:
   timescaledb_data:
-  #redis_data:
+  redis_data:
