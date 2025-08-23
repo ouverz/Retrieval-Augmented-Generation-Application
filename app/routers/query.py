@@ -2,6 +2,7 @@
 import time
 import logging
 from fastapi import APIRouter, Depends, HTTPException
+from typing import Optional, Dict, Any
 from app.schemas.query import QueryRequest, QueryResponse
 from app.deps import app_container
 from app.services.app_container import AppContainer
@@ -24,40 +25,95 @@ async def query_endpoint(req: QueryRequest, container: AppContainer = Depends(ap
             raise HTTPException(412, "Service not initialized. POST /init first.")
 
         t0 = time.time()
+        cache_hit = False
+        cache_key = None
         
-        # Check if hybrid engine exists and is properly initialized
-        if not container.hybrid_engine:
-            logger.error("Hybrid engine is None")
-            raise HTTPException(500, "Hybrid search engine not initialized")
+        # Try to get cached result if cache service is available
+        cached_result = None
+        if (container.cache_service and container.cache_service.is_available() 
+            and container.hybrid_engine and hasattr(container.hybrid_engine, 'config')):
+            try:
+                cached_result = container.cache_service.get_cached_query_result(
+                    req.query, req.top_k, container.hybrid_engine.config
+                )
+                if cached_result:
+                    cache_hit = True
+                    cache_key = container.cache_service._query_cache_key(
+                        req.query, req.top_k, 
+                        container.cache_service._config_hash(container.hybrid_engine.config)
+                    )
+                    logger.info(f"[API] Cache hit for query: {req.query[:50]}...")
+            except Exception as e:
+                logger.warning(f"[API] Cache lookup failed, proceeding without cache: {e}")
+                
+        if cached_result:
+            # Use cached result
+            ctx_df, response = cached_result
+            latency_ms = int((time.time() - t0) * 1000)
+        else:
+            # Cache miss - perform normal query processing
+            logger.info("[API] Cache miss - performing search")
+            
+            # Check if hybrid engine exists and is properly initialized
+            if not container.hybrid_engine:
+                logger.error("Hybrid engine is None")
+                raise HTTPException(500, "Hybrid search engine not initialized")
+            
+            # Check if BM25 engine has built index
+            if not container.bm25_engine or not container.bm25_engine.retriever:
+                logger.error("BM25 engine not properly initialized")
+                raise HTTPException(500, "BM25 search index not built. System may still be initializing.")
+            
+            # Check if LLM factory is available
+            if not container.llm_factory:
+                logger.error("LLM factory not initialized")
+                raise HTTPException(500, "LLM factory not initialized")
+            
+            logger.info("Performing hybrid search...")
+            
+            # The HybridSearchEngine.search() returns (ctx_df, response) 
+            # We'll use the response directly instead of calling synthesizer twice
+            ctx_df, response = await container.hybrid_engine.search(req.query, top_k=req.top_k)
+            
+            if response is None:
+                logger.warning("HybridSearchEngine returned None response, falling back to direct synthesis")
+                # Fallback to direct synthesis if hybrid engine didn't return response
+                response = await synthesize_answer(
+                    query=req.query,
+                    context=ctx_df,
+                    factory=container.llm_factory,
+                    max_attempts=2,
+                )
+            
+            latency_ms = int((time.time() - t0) * 1000)
+            logger.info(f"Query completed in {latency_ms}ms")
+            
+            # Cache the result if cache service is available
+            if (container.cache_service and container.cache_service.is_available() 
+                and container.hybrid_engine and hasattr(container.hybrid_engine, 'config')):
+                try:
+                    success = container.cache_service.cache_query_result(
+                        req.query, req.top_k, container.hybrid_engine.config,
+                        ctx_df, response
+                    )
+                    if success:
+                        logger.info("[API] Query result cached successfully")
+                        cache_key = container.cache_service._query_cache_key(
+                            req.query, req.top_k, 
+                            container.cache_service._config_hash(container.hybrid_engine.config)
+                        )
+                except Exception as e:
+                    logger.warning(f"[API] Failed to cache query result: {e}")
         
-        # Check if BM25 engine has built index
-        if not container.bm25_engine or not container.bm25_engine.retriever:
-            logger.error("BM25 engine not properly initialized")
-            raise HTTPException(500, "BM25 search index not built. System may still be initializing.")
-        
-        # Check if LLM factory is available
-        if not container.llm_factory:
-            logger.error("LLM factory not initialized")
-            raise HTTPException(500, "LLM factory not initialized")
-        
-        logger.info("Performing hybrid search...")
-        
-        # The HybridSearchEngine.search() returns (ctx_df, response) 
-        # We'll use the response directly instead of calling synthesizer twice
-        ctx_df, response = await container.hybrid_engine.search(req.query, top_k=req.top_k)
-        
-        if response is None:
-            logger.warning("HybridSearchEngine returned None response, falling back to direct synthesis")
-            # Fallback to direct synthesis if hybrid engine didn't return response
-            response = await synthesize_answer(
-                query=req.query,
-                context=ctx_df,
-                factory=container.llm_factory,
-                max_attempts=2,
-            )
-        
-        latency_ms = int((time.time() - t0) * 1000)
-        logger.info(f"Query completed in {latency_ms}ms")
+        # Update session history if session_id provided and cache service available
+        if req.session_id and container.cache_service and container.cache_service.is_available():
+            try:
+                # Create a brief summary of the response
+                response_summary = response.answer[:100] if hasattr(response, 'answer') else str(response)[:100]
+                container.cache_service.update_session(req.session_id, req.query, response_summary)
+                logger.info(f"[API] Updated session {req.session_id} with query history")
+            except Exception as e:
+                logger.warning(f"[API] Failed to update session history: {e}")
         
         # Create results table from ctx_df - now with true hybrid scores
         results_table = []
@@ -96,7 +152,10 @@ async def query_endpoint(req: QueryRequest, container: AppContainer = Depends(ap
             response_data = response.model_dump()
             response_data.update({
                 "latency_ms": latency_ms,
-                "results_table": results_table
+                "results_table": results_table,
+                "cache_hit": cache_hit,
+                "cache_key": cache_key,
+                "session_id": req.session_id
             })
             return QueryResponse(**response_data)
         else:
@@ -114,7 +173,10 @@ async def query_endpoint(req: QueryRequest, container: AppContainer = Depends(ap
                 "precision": 0.0,
                 "evidence_precision": "low",
                 "latency_ms": latency_ms,
-                "results_table": results_table
+                "results_table": results_table,
+                "cache_hit": cache_hit,
+                "cache_key": cache_key,
+                "session_id": req.session_id
             }
             return QueryResponse(**fallback_response)
     

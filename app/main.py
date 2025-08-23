@@ -2,7 +2,8 @@
 import logging
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
-from app.routers import query, ingest, init
+from app.routers import query, ingest, init, cache
+from app.deps import get_app_container
 
 # Configure logging
 logging.basicConfig(
@@ -36,7 +37,29 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
 @app.get("/healthz")
 def healthz():
+    """Basic health check endpoint."""
     return {"status": "ok"}
+
+
+@app.get("/health")
+def health():
+    """Detailed health check including cache status."""
+    try:
+        container = get_app_container()
+        cache_health = container.get_cache_health()
+        
+        return {
+            "status": "ok",
+            "service_ready": container.is_ready(),
+            "cache": cache_health
+        }
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "cache": {"error": "Unable to check cache status"}
+        }
 
 
 @app.on_event("startup")
@@ -52,3 +75,4 @@ async def shutdown_event():
 app.include_router(init.router, prefix="/init", tags=["init"])
 app.include_router(query.router, prefix="/query", tags=["query"])
 app.include_router(ingest.router, prefix="/ingest", tags=["ingest"])
+app.include_router(cache.router, prefix="/cache", tags=["cache"])

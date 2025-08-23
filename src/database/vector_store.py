@@ -5,6 +5,7 @@ from datetime import datetime
 
 import pandas as pd
 from src.config.settings import get_settings
+from src.services.cache_service import get_cache_service
 from openai import OpenAI
 from timescale_vector import client
 
@@ -13,11 +14,12 @@ class VectorStore:
     """A class for managing vector operations and database interactions."""
 
     def __init__(self):
-        """Initialize the VectorStore with settings, OpenAI client, and Timescale Vector client."""
+        """Initialize the VectorStore with settings, OpenAI client, cache service, and Timescale Vector client."""
         self.settings = get_settings()
         self.openai_client = OpenAI(api_key=self.settings.openai.api_key)
         self.embedding_model = self.settings.openai.embedding_model
         self.vector_settings = self.settings.vector_store
+        self.cache_service = get_cache_service()
         self.vec_client = client.Sync(
             self.settings.database.service_url,
             self.vector_settings.table_name,
@@ -27,7 +29,7 @@ class VectorStore:
 
     def get_embeddings(self, text: str) -> List[float]:
         """
-        Generate embeddings for the given text.
+        Generate embeddings for the given text with caching support.
 
         Args:
             text: The input text to generate an embedding for.
@@ -36,18 +38,37 @@ class VectorStore:
             A list of floats representing the embedding.
         """
         text = text.replace("\n", " ")
+        
+        # Check cache first
+        cached_embedding = self.cache_service.get_cached_embedding(text)
+        if cached_embedding is not None:
+            logging.info("[Backend] Cache hit for embedding - saved OpenAI API call")
+            return cached_embedding
+        
+        # Generate embedding via OpenAI API
         start_time = time.time()
-        embedding = (
-            self.openai_client.embeddings.create(
-                input=[text],
-                model=self.embedding_model,
+        try:
+            embedding = (
+                self.openai_client.embeddings.create(
+                    input=[text],
+                    model=self.embedding_model,
+                )
+                .data[0]
+                .embedding
             )
-            .data[0]
-            .embedding
-        )
-        elapsed_time = time.time() - start_time
-        logging.info(f"Embedding generated in {elapsed_time:.3f} seconds")
-        return embedding
+            elapsed_time = time.time() - start_time
+            logging.info(f"[Backend] Embedding generated in {elapsed_time:.3f} seconds")
+            
+            # Cache the result
+            self.cache_service.cache_embedding(text, embedding)
+            
+            return embedding
+            
+        except Exception as e:
+            elapsed_time = time.time() - start_time
+            logging.error(f"[Backend] Failed to generate embedding after {elapsed_time:.3f}s: {e}")
+            # Re-raise to maintain existing error handling behavior
+            raise
 
     def create_tables(self) -> None:
         """

@@ -9,3 +9,5 @@ anthropic
 requests
 fastapi
 uvicorn[standard]
+redis[hiredis]>=4.5.0
+hiredis>=2.2.0

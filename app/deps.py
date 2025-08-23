@@ -5,6 +5,7 @@ from fastapi import Depends
 from src.config.settings import get_settings
 from app.services.app_container import AppContainer
 from app.services.state_store import StateStore
+from src.services.cache_service import CacheService, get_cache_service
 
 # Global container instance to maintain state across requests
 _global_container = None
@@ -33,3 +34,15 @@ def app_container(dsn: str = Depends(pg_dsn)) -> AppContainer:
         data_dir = os.getenv("DATA_DIR", "./data")  # Use the actual data directory
         _global_container = AppContainer(data_dir=data_dir, pg_dsn=dsn)
     return _global_container
+
+
+# Alias for backward compatibility
+def get_app_container() -> AppContainer:
+    """Get app container instance for non-dependency injection usage."""
+    return app_container()
+
+
+@lru_cache()
+def cache_service() -> CacheService:
+    """Get cache service dependency for injection."""
+    return get_cache_service()

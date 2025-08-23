@@ -6,6 +6,7 @@ from langchain.schema import Document
 from src.BM25SearchEngine import BM25SearchEngine
 from src.VectorSearchEngine import VectorSearchEngine
 from src.config.settings import HybridSearchConfig
+from src.services.cache_service import get_cache_service
 from src.services.synthesizer import synthesize_answer
 
 
@@ -21,6 +22,7 @@ class HybridSearchEngine:
         self.bm25_engine = bm25_engine
         self.vector_engine = vector_engine
         self.config = config
+        self.cache_service = get_cache_service()
 
     def _score_bm25(self, docs: List[Document]) -> List[Document]:
         for i, d in enumerate(docs):
@@ -220,6 +222,19 @@ class HybridSearchEngine:
         return pd.DataFrame(rows)
 
     async def search(self, query: str, top_k: int = None, remove_duplicates: bool = True):
+        # Use top_k if provided, otherwise fall back to config max_results
+        final_limit = top_k if top_k is not None else self.config.max_results
+        
+        # Check cache first
+        cached_result = self.cache_service.get_cached_query_result(query, final_limit, self.config)
+        if cached_result is not None:
+            ctx_df, response = cached_result
+            print(f"[Backend] Cache hit for query: {query[:50]}...")
+            return ctx_df, response
+        
+        # Cache miss - perform full search
+        print(f"[Backend] Cache miss - performing full hybrid search")
+        
         # Get results from both engines
         bm25_docs = self.bm25_engine.search(query, self.config.bm25_top_k)
         vec_df = self.vector_engine.search(
@@ -236,8 +251,6 @@ class HybridSearchEngine:
         # Sort by true hybrid score
         hybrid_results.sort(key=lambda d: d.metadata.get("hybrid_score", 0.0), reverse=True)
         
-        # Use top_k if provided, otherwise fall back to config max_results
-        final_limit = top_k if top_k is not None else self.config.max_results
         top = hybrid_results[:final_limit]
         ctx_df = self._to_df(top)
         
@@ -249,11 +262,15 @@ class HybridSearchEngine:
         print(f"True Hybrid Search: {len(bm25_docs)} BM25 + {len(vec_df)} Vector → {len(hybrid_results)} unique → {len(top)} final")
         print(f"Final results: {bm25_count} found by BM25, {vector_count} found by Vector, {both_count} found by both")
 
-        # response = Synthesizer.generate_response(question=query, context=ctx_df)
+        # Generate response
         try:
             response = await synthesize_answer(query=query, context=ctx_df)
+            
+            # Cache the complete result
+            self.cache_service.cache_query_result(query, final_limit, self.config, ctx_df, response)
+            
             return ctx_df, response
         except Exception as e:
-            print(f"failed to return a response: {e}")
+            print(f"[Backend] Failed to generate response: {e}")
             # Return ctx_df and None so the caller can handle the synthesis
             return ctx_df, None

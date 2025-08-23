@@ -8,6 +8,7 @@ class QueryRequest(BaseModel):
     query: str
     filters: Optional[Dict[str, str]] = None
     top_k: int = Field(default=8, ge=1, le=100)
+    session_id: Optional[str] = Field(default=None, description="Optional session ID for tracking")
 
 
 class QueryResponse(SynthesizedResponse):
@@ -16,3 +17,6 @@ class QueryResponse(SynthesizedResponse):
         default=None, 
         description="Detailed breakdown of search results with scores and rankings"
     )
+    cache_hit: bool = Field(default=False, description="Whether response came from cache")
+    cache_key: Optional[str] = Field(default=None, description="Cache key used (for debugging)")
+    session_id: Optional[str] = Field(default=None, description="Session ID if provided")
