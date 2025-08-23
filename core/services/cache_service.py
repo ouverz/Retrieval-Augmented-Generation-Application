@@ -119,7 +119,15 @@ class CacheService:
                 logger.info(f"Cache hit for query: {query[:50]}...")
                 data = json.loads(cached)
                 context_df = pd.read_json(data['context'])
-                return context_df, data['response']
+                
+                # Reconstruct SynthesizedResponse object from cached dict
+                from core.services.synthesis_service import SynthesizedResponse
+                if isinstance(data['response'], dict):
+                    response = SynthesizedResponse(**data['response'])
+                else:
+                    response = data['response']
+                
+                return context_df, response
         except Exception as e:
             logger.warning(f"Error retrieving cached query result: {e}")
         
