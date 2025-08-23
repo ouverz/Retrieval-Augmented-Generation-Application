@@ -6,17 +6,17 @@ import threading
 import time
 from typing import Dict, Any
 from fastapi import APIRouter, Depends, BackgroundTasks
-from app.schemas.ingest import InitRequest, InitResponse, InitStatusResponse
-from app.deps import app_container, state_store
-from app.services.app_container import AppContainer
-from app.services.state_store import StateStore
+from backend.schemas.ingest import InitRequest, InitResponse, InitStatusResponse
+from backend.dependencies import app_container, state_store
+from backend.container import AppContainer
+from backend.state_store import StateStore
 
-from src.Processing_Documents import DocumentProcessor, RAGApplication
-from src.VectorSearchEngine import VectorSearchEngine
-from src.BM25SearchEngine import BM25SearchEngine
-from src.HybridSearchEngine import HybridSearchEngine
-from src.services.llm_factory import LLMFactory
-from src.config.settings import HybridSearchConfig
+from core.processors.document_processor import DocumentProcessor, RAGApplication
+from core.search.vector_search import VectorSearchEngine
+from core.search.bm25_search import BM25SearchEngine
+from core.search.hybrid_search import HybridSearchEngine
+from core.services.llm_service import LLMFactory
+from config.settings import HybridSearchConfig
 
 router = APIRouter()
 

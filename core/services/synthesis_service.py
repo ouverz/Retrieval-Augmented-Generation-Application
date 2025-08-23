@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import List, Literal, Optional, Sequence, Iterable, Annotated
 import pandas as pd
 from pydantic import BaseModel, Field
-from src.services.llm_factory import LLMFactory
+from core.services.llm_service import LLMFactory
 
 
 class Citation(BaseModel):

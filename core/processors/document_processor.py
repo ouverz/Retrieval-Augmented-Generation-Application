@@ -6,11 +6,11 @@ from typing import Optional
 from docling.document_converter import DocumentConverter
 from docling.chunking import HybridChunker
 
-from src.extract_keywords import extract_metadata_with_pypdf
-from src.VectorSearchEngine import VectorSearchEngine
-from src.BM25SearchEngine import BM25SearchEngine
-from src.HybridSearchEngine import HybridSearchEngine
-from src.config.settings import HybridSearchConfig
+from core.utils.extract_keywords import extract_metadata_with_pypdf
+from core.search.vector_search import VectorSearchEngine
+from core.search.bm25_search import BM25SearchEngine
+from core.search.hybrid_search import HybridSearchEngine
+from config.settings import HybridSearchConfig
 
 
 class DocumentProcessor:

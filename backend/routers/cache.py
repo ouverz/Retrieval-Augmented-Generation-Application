@@ -4,8 +4,8 @@ from fastapi import APIRouter, HTTPException, Depends
 from typing import Dict, Any
 from enum import Enum
 
-from app.deps import get_app_container
-from app.services.app_container import AppContainer
+from backend.dependencies import get_app_container
+from backend.container import AppContainer
 
 logger = logging.getLogger(__name__)
 

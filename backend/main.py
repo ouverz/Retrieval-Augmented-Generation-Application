@@ -2,8 +2,8 @@
 import logging
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
-from app.routers import query, ingest, init, cache
-from app.deps import get_app_container
+from backend.routers import query, ingest, init, cache
+from backend.dependencies import get_app_container
 
 # Configure logging
 logging.basicConfig(

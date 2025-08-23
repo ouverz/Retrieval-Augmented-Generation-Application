@@ -6,8 +6,8 @@ from typing import List, Optional, Tuple, Union
 import pandas as pd
 from timescale_vector.client import uuid_from_time
 
-from src.database.vector_store import VectorStore
-from src.extract_keywords import extract_keywords
+from core.database.vector_store import VectorStore
+from core.utils.extract_keywords import extract_keywords
 
 
 class VectorSearchEngine:

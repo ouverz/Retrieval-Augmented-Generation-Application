@@ -3,11 +3,11 @@ from typing import List
 import pandas as pd
 from langchain.schema import Document
 
-from src.BM25SearchEngine import BM25SearchEngine
-from src.VectorSearchEngine import VectorSearchEngine
-from src.config.settings import HybridSearchConfig
-from src.services.cache_service import get_cache_service
-from src.services.synthesizer import synthesize_answer
+from core.search.bm25_search import BM25SearchEngine
+from core.search.vector_search import VectorSearchEngine
+from config.settings import HybridSearchConfig
+from core.services.cache_service import get_cache_service
+from core.services.synthesis_service import synthesize_answer
 
 
 class HybridSearchEngine:

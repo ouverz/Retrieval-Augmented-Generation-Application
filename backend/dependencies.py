@@ -2,10 +2,10 @@
 import os
 from functools import lru_cache
 from fastapi import Depends
-from src.config.settings import get_settings
-from app.services.app_container import AppContainer
-from app.services.state_store import StateStore
-from src.services.cache_service import CacheService, get_cache_service
+from config.settings import get_settings
+from backend.container import AppContainer
+from backend.state_store import StateStore
+from core.services.cache_service import CacheService, get_cache_service
 
 # Global container instance to maintain state across requests
 _global_container = None
@@ -31,7 +31,7 @@ def state_store(dsn: str = Depends(pg_dsn)) -> StateStore:
 def app_container(dsn: str = Depends(pg_dsn)) -> AppContainer:
     global _global_container
     if _global_container is None:
-        data_dir = os.getenv("DATA_DIR", "./data")  # Use the actual data directory
+        data_dir = os.getenv("DATA_DIR", "./data/documents")  # Use the new data directory
         _global_container = AppContainer(data_dir=data_dir, pg_dsn=dsn)
     return _global_container
 

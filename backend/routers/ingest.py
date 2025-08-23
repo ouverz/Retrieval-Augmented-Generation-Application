@@ -2,8 +2,8 @@
 import os
 import shutil
 from fastapi import APIRouter, UploadFile, File, Depends
-from app.deps import app_container, state_store
-from app.schemas.ingest import IngestResponse
+from backend.dependencies import app_container, state_store
+from backend.schemas.ingest import IngestResponse
 
 router = APIRouter()
 

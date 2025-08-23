@@ -4,8 +4,8 @@ from typing import Any, List, Optional, Tuple, Union
 from datetime import datetime
 
 import pandas as pd
-from src.config.settings import get_settings
-from src.services.cache_service import get_cache_service
+from config.settings import get_settings
+from core.services.cache_service import get_cache_service
 from openai import OpenAI
 from timescale_vector import client
 

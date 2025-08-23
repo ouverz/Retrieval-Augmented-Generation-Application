@@ -12,7 +12,7 @@ from typing import Optional, Dict, Any, List
 import pandas as pd
 from datetime import datetime
 
-from src.config.settings import get_settings
+from config.settings import get_settings
 
 logger = logging.getLogger(__name__)
 

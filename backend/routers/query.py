@@ -3,10 +3,10 @@ import time
 import logging
 from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional, Dict, Any
-from app.schemas.query import QueryRequest, QueryResponse
-from app.deps import app_container
-from app.services.app_container import AppContainer
-from src.services.synthesizer import synthesize_answer
+from backend.schemas.query import QueryRequest, QueryResponse
+from backend.dependencies import app_container
+from backend.container import AppContainer
+from core.services.synthesis_service import synthesize_answer
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)

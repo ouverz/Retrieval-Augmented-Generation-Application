@@ -2,7 +2,7 @@
 from typing import Type, Optional
 from pydantic import BaseModel
 
-from src.config.settings import get_settings
+from config.settings import get_settings
 from pydantic_ai import Agent
 from pydantic_ai.models.openai import OpenAIModel
 from pydantic_ai.models.anthropic import AnthropicModel

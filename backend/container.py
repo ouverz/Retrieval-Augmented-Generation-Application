@@ -1,12 +1,12 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
-from src.services.llm_factory import LLMFactory
-from src.services.cache_service import CacheService, get_cache_service
-from src.HybridSearchEngine import HybridSearchEngine
-from src.BM25SearchEngine import BM25SearchEngine
-from src.VectorSearchEngine import VectorSearchEngine
-from src.Processing_Documents import DocumentProcessor, RAGApplication
+from core.services.llm_service import LLMFactory
+from core.services.cache_service import CacheService, get_cache_service
+from core.search.hybrid_search import HybridSearchEngine
+from core.search.bm25_search import BM25SearchEngine
+from core.search.vector_search import VectorSearchEngine
+from core.processors.document_processor import DocumentProcessor, RAGApplication
 
 
 @dataclass
