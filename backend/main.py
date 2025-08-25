@@ -70,6 +70,13 @@ async def startup_event():
 @app.on_event("shutdown") 
 async def shutdown_event():
     logger.info("RAG Service shutting down...")
+    try:
+        container = get_app_container()
+        if container.vector_engine and hasattr(container.vector_engine, 'vector_store'):
+            container.vector_engine.vector_store.close()
+        logger.info("Database connections closed successfully")
+    except Exception as e:
+        logger.warning(f"Error during shutdown cleanup: {e}")
 
 
 app.include_router(init.router, prefix="/init", tags=["init"])
