@@ -164,25 +164,25 @@ curl http://localhost:8000/cache/health
                           ▼
 ┌─────────────────────────────────────────────────────────┐
 │                   Core Business Logic                   │
-│  ┌─────────────────┐ ┌─────────────────┐ ┌───────────┐ │
-│  │   Processors    │ │   Search        │ │ Services  │ │
-│  │ • Document      │ │ • Vector        │ │ • Cache   │ │
-│  │   processing    │ │ • BM25          │ │ • LLM     │ │
+│  ┌─────────────────┐ ┌─────────────────┐ ┌───────────┐  │
+│  │   Processors    │ │   Search        │ │ Services  │  │
+│  │ • Document      │ │ • Vector        │ │ • Cache   │  │
+│  │   processing    │ │ • BM25          │ │ • LLM     │  │
 │  │ • PDF parsing   │ │ • Hybrid        │ │ • Synthesis│ │
-│  │ • Chunking      │ │ • Fusion        │ │ • Utils   │ │
-│  └─────────────────┘ └─────────────────┘ └───────────┘ │
+│  │ • Chunking      │ │ • Fusion        │ │ • Utils   │  │
+│  └─────────────────┘ └─────────────────┘ └───────────┘  │
 └─────────────────────────┬───────────────────────────────┘
                           │ Data Operations
                           ▼
-┌─────────────────────────────────────────────────────────┐
-│                  Infrastructure Layer                   │
-│  ┌─────────────────┐ ┌─────────────────┐ ┌───────────┐ │
-│  │  TimescaleDB    │ │     Redis       │ │  OpenAI   │ │
-│  │ • Vector store  │ │ • Query cache   │ │ • Embeddings │
-│  │ • pgvector      │ │ • Session mgmt  │ │ • LLM calls  │
-│  │ • Time series   │ │ • Graceful fail │ │ • API mgmt   │ │
-│  └─────────────────┘ └─────────────────┘ └───────────┘ │
-└─────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────┐
+│                  Infrastructure Layer                     │
+│  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────┐  │
+│  │  TimescaleDB    │ │     Redis       │ │  OpenAI     │  │
+│  │ • Vector store  │ │ • Query cache   │ │ • Embeddings   │
+│  │ • pgvector      │ │ • Session mgmt  │ │ • LLM calls    │
+│  │ • Time series   │ │ • Graceful fail │ │ • API mgmt  │  │
+│  └─────────────────┘ └─────────────────┘ └─────────────┘  │
+└───────────────────────────────────────────────────────────┘
 ```
 
 ## File Structure Reference
