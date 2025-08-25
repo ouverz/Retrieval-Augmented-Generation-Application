@@ -73,7 +73,11 @@ async def query_endpoint(req: QueryRequest, container: AppContainer = Depends(ap
             
             # The HybridSearchEngine.search() returns (ctx_df, response) 
             # We'll use the response directly instead of calling synthesizer twice
-            ctx_df, response = await container.hybrid_engine.search(req.query, top_k=req.top_k)
+            ctx_df, response = await container.hybrid_engine.search(
+                req.query, 
+                top_k=req.top_k, 
+                vector_weight=req.vector_weight
+            )
             
             if response is None:
                 logger.warning("HybridSearchEngine returned None response, falling back to direct synthesis")

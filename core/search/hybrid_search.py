@@ -78,8 +78,12 @@ class HybridSearchEngine:
         else:  # Clean content
             return 1.0
 
-    def _create_true_hybrid_scores(self, bm25_docs: List[Document], vec_df: pd.DataFrame, query: str) -> List[Document]:
+    def _create_true_hybrid_scores(self, bm25_docs: List[Document], vec_df: pd.DataFrame, query: str, vector_weight: float = None, bm25_weight: float = None) -> List[Document]:
         """Create true hybrid scores where each document gets both BM25 and Vector scores"""
+        
+        # Use provided weights or fall back to config defaults
+        effective_vector_weight = vector_weight if vector_weight is not None else self.config.vector_weight
+        effective_bm25_weight = bm25_weight if bm25_weight is not None else self.config.bm25_weight
         
         # DEBUG: Log document details to identify matching issues
         print(f"DEBUG: BM25 docs ({len(bm25_docs)}):")
@@ -127,7 +131,7 @@ class HybridSearchEngine:
                 content = doc.page_content or ""
                 quality_penalty = self._calculate_content_quality_score(content)
                 bm25_raw_score = 1.0 / rank
-                bm25_score = self.config.bm25_weight * bm25_raw_score * quality_penalty
+                bm25_score = effective_bm25_weight * bm25_raw_score * quality_penalty
                 bm25_rank = rank
                 found_by.append("bm25")
                 base_doc = doc
@@ -142,7 +146,7 @@ class HybridSearchEngine:
                 similarity, row, rank = vector_lookup[content_hash]
                 vector_similarity = similarity
                 vector_distance = float(row["distance"])
-                vector_score = self.config.vector_weight * vector_distance  # Use distance for apples-to-apples comparison with BM25
+                vector_score = effective_vector_weight * vector_distance  # Use distance for apples-to-apples comparison with BM25
                 vector_rank = rank
                 found_by.append("vector")
                 
@@ -221,19 +225,30 @@ class HybridSearchEngine:
             )
         return pd.DataFrame(rows)
 
-    async def search(self, query: str, top_k: int = None, remove_duplicates: bool = True):
+    async def search(self, query: str, top_k: int = None, remove_duplicates: bool = True, vector_weight: float = None):
         # Use top_k if provided, otherwise fall back to config max_results
         final_limit = top_k if top_k is not None else self.config.max_results
         
+        # Calculate runtime weights - use provided weights or fall back to config
+        runtime_vector_weight = vector_weight if vector_weight is not None else self.config.vector_weight
+        runtime_bm25_weight = 1.0 - runtime_vector_weight
+        
+        # Create runtime config for caching (only if weights differ from default)
+        cache_config = self.config
+        if vector_weight is not None:
+            # Create a temporary config copy for cache key generation
+            from dataclasses import replace
+            cache_config = replace(self.config, vector_weight=runtime_vector_weight, bm25_weight=runtime_bm25_weight)
+        
         # Check cache first
-        cached_result = self.cache_service.get_cached_query_result(query, final_limit, self.config)
+        cached_result = self.cache_service.get_cached_query_result(query, final_limit, cache_config)
         if cached_result is not None:
             ctx_df, response = cached_result
-            print(f"[Backend] Cache hit for query: {query[:50]}...")
+            print(f"[Backend] Cache hit for query: {query[:50]}... (weights: v={runtime_vector_weight:.2f}, bm25={runtime_bm25_weight:.2f})")
             return ctx_df, response
         
         # Cache miss - perform full search
-        print(f"[Backend] Cache miss - performing full hybrid search")
+        print(f"[Backend] Cache miss - performing full hybrid search (weights: v={runtime_vector_weight:.2f}, bm25={runtime_bm25_weight:.2f})")
         
         # Get results from both engines
         bm25_docs = self.bm25_engine.search(query, self.config.bm25_top_k)
@@ -241,8 +256,8 @@ class HybridSearchEngine:
             query, self.config.vector_top_k, return_dataframe=True
         )
         
-        # Create true hybrid scoring
-        hybrid_results = self._create_true_hybrid_scores(bm25_docs, vec_df, query)
+        # Create true hybrid scoring with runtime weights
+        hybrid_results = self._create_true_hybrid_scores(bm25_docs, vec_df, query, runtime_vector_weight, runtime_bm25_weight)
         
         # Apply deduplication if requested
         if remove_duplicates:
@@ -267,7 +282,7 @@ class HybridSearchEngine:
             response = await synthesize_answer(query=query, context=ctx_df)
             
             # Cache the complete result
-            self.cache_service.cache_query_result(query, final_limit, self.config, ctx_df, response)
+            self.cache_service.cache_query_result(query, final_limit, cache_config, ctx_df, response)
             
             return ctx_df, response
         except Exception as e:
