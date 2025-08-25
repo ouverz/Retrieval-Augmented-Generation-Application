@@ -27,6 +27,22 @@ class VectorStore:
             time_partition_interval=self.vector_settings.time_partition_interval,
         )
 
+    def close(self):
+        """Close database connections and clean up resources."""
+        try:
+            if hasattr(self.vec_client, 'close'):
+                self.vec_client.close()
+            elif hasattr(self.vec_client, '_client') and hasattr(self.vec_client._client, 'close'):
+                self.vec_client._client.close()
+        except Exception as e:
+            logging.warning(f"Error closing vector client: {e}")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+
     def get_embeddings(self, text: str) -> List[float]:
         """
         Generate embeddings for the given text with caching support.
