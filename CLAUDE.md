@@ -25,7 +25,8 @@ the function does.
 ## Development Commands
 
 - **Activate virtual environment**: `source venv/bin/activate` if using venv
-- **Install dependencies**: `pip install -r requirements.txt`
+- **Install dependencies**: `uv sync` (preferred) or `pip install -r requirements.txt`
+- **Setup NLTK data**: `python scripts/setup_nltk.py` (run once after dependencies)
 
 
 ### Testing

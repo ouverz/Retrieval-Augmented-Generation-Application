@@ -11,3 +11,4 @@ fastapi
 uvicorn[standard]
 redis[hiredis]>=4.5.0
 hiredis>=2.2.0
+nltk>=3.8.1
