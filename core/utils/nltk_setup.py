@@ -17,25 +17,55 @@ def setup_nltk_data():
     # Add our custom path to NLTK's data path
     nltk.data.path.insert(0, str(nltk_data_dir))
     
-    required_resources = [
-        'punkt_tab',
-        'punkt',
-        'stopwords'
+    # Try to get punkt_tab (preferred) or punkt (fallback)
+    punkt_resources = [
+        ('punkt_tab', 'tokenizers/punkt_tab'),
+        ('punkt', 'tokenizers/punkt')  # fallback
     ]
     
-    for resource in required_resources:
+    punkt_downloaded = False
+    for resource_name, check_path in punkt_resources:
         try:
-            nltk.data.find(f'tokenizers/{resource}')
-            print(f"✅ NLTK resource '{resource}' already available")
+            nltk.data.find(check_path)
+            print(f"✅ NLTK resource '{resource_name}' already available")
+            punkt_downloaded = True
+            break
         except LookupError:
             try:
-                print(f"📥 Downloading NLTK resource: {resource}")
-                nltk.download(resource, download_dir=str(nltk_data_dir))
-                print(f"✅ Successfully downloaded '{resource}'")
+                print(f"📥 Downloading NLTK resource: {resource_name}")
+                nltk.download(resource_name, download_dir=str(nltk_data_dir))
+                print(f"✅ Successfully downloaded '{resource_name}'")
+                punkt_downloaded = True
+                break
             except Exception as e:
-                print(f"❌ Failed to download '{resource}': {e}")
+                print(f"❌ Failed to download '{resource_name}': {e}")
+    
+    if not punkt_downloaded:
+        print("⚠️  No punkt tokenizer available - will use simple fallback")
+    
+    # Download stopwords
+    try:
+        nltk.data.find('corpora/stopwords')
+        print("✅ NLTK resource 'stopwords' already available")
+    except LookupError:
+        try:
+            print("📥 Downloading NLTK resource: stopwords")
+            nltk.download('stopwords', download_dir=str(nltk_data_dir))
+            print("✅ Successfully downloaded 'stopwords'")
+        except Exception as e:
+            print(f"❌ Failed to download 'stopwords': {e}")
     
     print(f"🎯 NLTK data directory: {nltk_data_dir}")
+    
+    # Test that punkt_tab is working
+    try:
+        from nltk.tokenize import word_tokenize
+        test_tokens = word_tokenize("This is a test sentence.")
+        print(f"✅ NLTK tokenizer test successful: {len(test_tokens)} tokens")
+        return True
+    except Exception as e:
+        print(f"⚠️  NLTK tokenizer test failed: {e}")
+        return False
 
 
 if __name__ == "__main__":

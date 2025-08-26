@@ -17,24 +17,35 @@ def simple_tokenize(text: str) -> List[str]:
     return tokens
 
 # Try to use NLTK if available, otherwise fall back to simple tokenizer
+def get_nltk_tokenizer():
+    """Get best available NLTK tokenizer."""
+    try:
+        from nltk.tokenize import word_tokenize
+        # Test if word_tokenize works (requires punkt_tab in newer NLTK)
+        word_tokenize("test")
+        return word_tokenize, "word_tokenize"
+    except (LookupError, OSError):
+        # Fall back to TreebankWordTokenizer (no external data required)
+        from nltk.tokenize import TreebankWordTokenizer
+        tokenizer = TreebankWordTokenizer()
+        return tokenizer.tokenize, "TreebankWordTokenizer"
+
 try:
     import nltk
-    from nltk.tokenize import word_tokenize
     
     # Set NLTK data path to project directory if it exists
     nltk_data_dir = Path(__file__).parent.parent.parent / "data" / "nltk_data"
     if nltk_data_dir.exists():
         nltk.data.path.insert(0, str(nltk_data_dir))
     
-    # Test if punkt resources are available
-    nltk.data.find('tokenizers/punkt')
-    tokenizer_func = word_tokenize
-    print("✅ Using NLTK word_tokenize for BM25")
+    # Get the best available NLTK tokenizer
+    tokenizer_func, tokenizer_name = get_nltk_tokenizer()
+    print(f"✅ Using NLTK {tokenizer_name} for BM25")
     
-except (ImportError, LookupError):
+except (ImportError, Exception) as e:
     # Use simple tokenizer as fallback
     tokenizer_func = simple_tokenize
-    print("⚠️  Using simple tokenizer for BM25 (NLTK not available)")
+    print(f"⚠️  Using simple tokenizer for BM25 (NLTK error: {type(e).__name__})")
 
 
 class BM25SearchEngine:
