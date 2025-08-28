@@ -4,7 +4,7 @@ import os
 import glob
 import threading
 import time
-from typing import Dict, Any
+import pandas as pd
 from fastapi import APIRouter, Depends, BackgroundTasks
 from backend.schemas.ingest import InitRequest, InitResponse, InitStatusResponse
 from backend.dependencies import app_container, state_store
@@ -108,21 +108,14 @@ def _run_initialization_background(container: AppContainer, dataset_hash: str, s
         )
         
         _update_status("running", 0.4, "Processing documents and creating embeddings...", 0, total_pdfs)
-        processor.run_application()  # This processes PDFs and adds chunks to BM25 engine
+        all_docs_df = processor.run_application()  # This processes PDFs and adds chunks to BM25 engine
         
         _update_status("running", 0.6, "Building BM25 search index...", total_pdfs, total_pdfs)
-        try:
-            # Load processed documents with proper UUIDs
-            import pandas as pd
-            docs_df = pd.read_csv("processed_rag_documents.csv")
-            bm25_engine.build_index(docs_df)  # Pass DataFrame with UUIDs
-        except ValueError as e:
-            if "No documents to index" in str(e):
-                raise ValueError(f"No documents found in {container.data_dir}. Please add PDF files and try again.")
-            raise
-        except FileNotFoundError:
-            # Fallback to old method if CSV doesn't exist
-            bm25_engine.build_index()  # Build from accumulated documents
+        # Use processed DataFrame directly - no need for CSV roundtrip
+        if isinstance(all_docs_df, pd.DataFrame) and not all_docs_df.empty:
+            bm25_engine.build_index(all_docs_df)  # Pass DataFrame with UUIDs directly
+        else:
+            raise ValueError(f"No documents found in {container.data_dir}. Please add PDF files and try again.")
         
         _update_status("running", 0.7, "Documents processed, building hybrid search engine...", total_pdfs, total_pdfs)
         
