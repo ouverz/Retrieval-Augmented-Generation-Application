@@ -115,6 +115,10 @@ class HybridSearchEngine:
             if i < 3:  # Debug first few hashes
                 print(f"DEBUG: Vector hash {i+1}: {content_hash}")
         
+        # Check for hash overlaps (document-level fusion opportunities)
+        hash_overlaps = set(bm25_lookup.keys()) & set(vector_lookup.keys())
+        print(f"DEBUG: Found {len(hash_overlaps)} content hash overlaps (fusion opportunities)")
+        
         # Collect all unique documents
         all_content_hashes = set(bm25_lookup.keys()) | set(vector_lookup.keys())
         
@@ -131,10 +135,9 @@ class HybridSearchEngine:
                 content = doc.page_content or ""
                 quality_penalty = self._calculate_content_quality_score(content)
                 bm25_raw_score = 1.0 / rank
-                bm25_score = effective_bm25_weight * bm25_raw_score * quality_penalty
-                bm25_rank = rank
                 found_by.append("bm25")
                 base_doc = doc
+                bm25_rank = rank
             
             # Get Vector score
             vector_score = 0.0
@@ -146,7 +149,6 @@ class HybridSearchEngine:
                 similarity, row, rank = vector_lookup[content_hash]
                 vector_similarity = similarity
                 vector_distance = float(row["distance"])
-                vector_score = effective_vector_weight * vector_distance  # Use distance for apples-to-apples comparison with BM25
                 vector_rank = rank
                 found_by.append("vector")
                 
@@ -157,6 +159,22 @@ class HybridSearchEngine:
                         page_content=row["content"],
                         metadata={"id": row["id"]}
                     )
+            
+            # Apply appropriate weights based on which engines found the document
+            # This ensures single-engine documents aren't penalized by weight distribution
+            if len(found_by) == 1:
+                # Document found by only one engine - use full weight (1.0)
+                # This prevents artificial penalization of unique results
+                if "bm25" in found_by:
+                    bm25_score = 1.0 * bm25_raw_score * quality_penalty
+                if "vector" in found_by:
+                    vector_score = 1.0 * vector_distance
+            else:
+                # Document found by both engines - use configured weights
+                if "bm25" in found_by:
+                    bm25_score = effective_bm25_weight * bm25_raw_score * quality_penalty
+                if "vector" in found_by:
+                    vector_score = effective_vector_weight * vector_distance
             
             # Calculate true hybrid score
             hybrid_score = bm25_score + vector_score

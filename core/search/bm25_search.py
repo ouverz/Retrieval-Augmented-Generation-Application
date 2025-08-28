@@ -90,7 +90,7 @@ class BM25SearchEngine:
                 if pd.notna(row.get("keywords")):
                     meta["keywords"] = row["keywords"]
 
-                doc = Document(page_content=row["chunk_text"], metadata=meta)
+                doc = Document(page_content=row["chunk_enriched"], metadata=meta)
                 self.documents.append(doc)
 
         if not self.documents:
