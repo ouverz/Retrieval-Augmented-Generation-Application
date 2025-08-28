@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 from typing import List, Literal, Optional, Sequence, Iterable, Annotated
 import pandas as pd
 from pydantic import BaseModel, Field
 from core.services.llm_service import LLMFactory
+
+logger = logging.getLogger(__name__)
 
 
 class Citation(BaseModel):
@@ -213,12 +216,12 @@ async def synthesize_answer(
 
         except Exception as e:
             last_error = e
-            print(f"Synthesis attempt {attempt + 1} failed: {e}")
+            logger.warning(f"Synthesis attempt {attempt + 1} failed: {e}")
             if attempt < attempts - 1:
-                print(f"Retrying... ({attempt + 2}/{attempts})")
+                logger.info(f"Retrying... ({attempt + 2}/{attempts})")
     
     # All attempts failed
-    print(f"Failed to synthesize message after {attempts} attempts: {last_error}")
+    logger.error(f"Failed to synthesize message after {attempts} attempts: {last_error}")
     return SynthesizedResponse(
         thought_process=["Error during synthesis - all retry attempts failed"],
         answer="I encountered an error processing your request. Please try again.",

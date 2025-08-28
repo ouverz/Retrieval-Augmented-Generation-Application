@@ -1,5 +1,6 @@
 # app/routers/init.py
 import hashlib
+import logging
 import os
 import glob
 import threading
@@ -18,6 +19,7 @@ from core.search.hybrid_search import HybridSearchEngine
 from core.services.llm_service import LLMFactory
 from config.settings import HybridSearchConfig
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # Global initialization status
@@ -156,7 +158,7 @@ def _run_initialization_background(container: AppContainer, dataset_hash: str, s
         
     except Exception as e:
         error_msg = str(e)
-        print(f"Background initialization error: {error_msg}")
+        logger.error(f"Background initialization error: {error_msg}")
         import traceback
         traceback.print_exc()
         _update_status("error", 0.0, f"Error: {error_msg}", 0, 0, error_msg)
@@ -187,7 +189,7 @@ def initialize(
         return InitResponse(initialized=False, reason="initialization-started")
     
     except Exception as e:
-        print(f"Initialization startup error: {e}")
+        logger.error(f"Initialization startup error: {e}")
         import traceback
         traceback.print_exc()
         _update_status("error", 0.0, str(e), error=str(e))

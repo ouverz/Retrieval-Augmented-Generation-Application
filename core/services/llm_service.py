@@ -1,4 +1,5 @@
 # services/llm_factory.py
+import logging
 from typing import Type, Optional
 from pydantic import BaseModel
 
@@ -6,6 +7,8 @@ from config.settings import get_settings
 from pydantic_ai import Agent
 from pydantic_ai.models.openai import OpenAIModel
 from pydantic_ai.models.anthropic import AnthropicModel
+
+logger = logging.getLogger(__name__)
 
 
 class LLMFactory:
@@ -138,8 +141,8 @@ class LLMFactory:
                 return validated_response
                 
             except (json.JSONDecodeError, TypeError, ValueError) as e:
-                print(f"WARNING: Failed to parse LLM response as structured JSON: {e}")
-                print(f"Raw response: {raw_data[:200]}...")
+                logger.warning(f"Failed to parse LLM response as structured JSON: {e}")
+                logger.debug(f"Raw response: {raw_data[:200]}...")
                 # Force create a valid response rather than returning raw string
                 return result_type(
                     thought_process=["LLM returned non-structured response"],
@@ -156,7 +159,7 @@ class LLMFactory:
             try:
                 return result_type(**raw_data)
             except (TypeError, ValueError) as e:
-                print(f"WARNING: Failed to validate dict response: {e}")
+                logger.warning(f"Failed to validate dict response: {e}")
                 # Force create valid response from dict
                 return result_type(
                     thought_process=["LLM returned invalid structured response"],
@@ -169,7 +172,7 @@ class LLMFactory:
                 )
         
         # Last resort: force structure on any other type
-        print(f"WARNING: LLM returned unexpected type {type(raw_data)}: {raw_data}")
+        logger.warning(f"LLM returned unexpected type {type(raw_data)}: {raw_data}")
         return result_type(
             thought_process=["LLM returned completely unexpected response format"],
             answer=f"System error: Received {type(raw_data).__name__} instead of structured response",

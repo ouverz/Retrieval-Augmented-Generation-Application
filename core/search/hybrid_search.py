@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import List
 import pandas as pd
+import logging
 from langchain.schema import Document
 
 from core.search.bm25_search import BM25SearchEngine
@@ -8,6 +9,8 @@ from core.search.vector_search import VectorSearchEngine
 from config.settings import HybridSearchConfig
 from core.services.cache_service import get_cache_service
 from core.services.synthesis_service import synthesize_answer
+
+logger = logging.getLogger(__name__)
 
 
 class HybridSearchEngine:
@@ -86,17 +89,17 @@ class HybridSearchEngine:
         effective_bm25_weight = bm25_weight if bm25_weight is not None else self.config.bm25_weight
         
         # DEBUG: Log document details to identify matching issues
-        print(f"DEBUG: BM25 docs ({len(bm25_docs)}):")
+        logger.debug(f"BM25 docs ({len(bm25_docs)}):")
         for i, doc in enumerate(bm25_docs[:3]):  # Show first 3
             content_preview = (doc.page_content or "")[:100] + "..."
             doc_id = doc.metadata.get("id", "NO_ID")
-            print(f"  {i+1}. ID: {doc_id}, Content: {content_preview}")
+            logger.debug(f"  {i+1}. ID: {doc_id}, Content: {content_preview}")
         
-        print(f"DEBUG: Vector docs ({len(vec_df)}):")
+        logger.debug(f"Vector docs ({len(vec_df)}):")
         for i, (_, row) in enumerate(vec_df.head(3).iterrows()):  # Show first 3
             content_preview = (row["content"] or "")[:100] + "..."
             doc_id = row.get("id", "NO_ID")
-            print(f"  {i+1}. ID: {doc_id}, Content: {content_preview}")
+            logger.debug(f"  {i+1}. ID: {doc_id}, Content: {content_preview}")
         
         # Build lookup dictionaries for efficient access
         bm25_lookup = {}  # content_hash -> (rank, doc)
@@ -104,7 +107,7 @@ class HybridSearchEngine:
             content_hash = hash((doc.page_content or "").strip().lower())
             bm25_lookup[content_hash] = (i + 1, doc)
             if i < 3:  # Debug first few hashes
-                print(f"DEBUG: BM25 hash {i+1}: {content_hash}")
+                logger.debug(f"BM25 hash {i+1}: {content_hash}")
         
         vector_lookup = {}  # content_hash -> (similarity, row)
         for i, (_, row) in enumerate(vec_df.iterrows()):
@@ -113,11 +116,11 @@ class HybridSearchEngine:
             similarity = 1.0 / (1.0 + distance)
             vector_lookup[content_hash] = (similarity, row, i + 1)
             if i < 3:  # Debug first few hashes
-                print(f"DEBUG: Vector hash {i+1}: {content_hash}")
+                logger.debug(f"Vector hash {i+1}: {content_hash}")
         
         # Check for hash overlaps (document-level fusion opportunities)
         hash_overlaps = set(bm25_lookup.keys()) & set(vector_lookup.keys())
-        print(f"DEBUG: Found {len(hash_overlaps)} content hash overlaps (fusion opportunities)")
+        logger.debug(f"Found {len(hash_overlaps)} content hash overlaps (fusion opportunities)")
         
         # Collect all unique documents
         all_content_hashes = set(bm25_lookup.keys()) | set(vector_lookup.keys())
@@ -262,11 +265,11 @@ class HybridSearchEngine:
         cached_result = self.cache_service.get_cached_query_result(query, final_limit, cache_config)
         if cached_result is not None:
             ctx_df, response = cached_result
-            print(f"[Backend] Cache hit for query: {query[:50]}... (weights: v={runtime_vector_weight:.2f}, bm25={runtime_bm25_weight:.2f})")
+            logger.info(f"Cache hit for query: {query[:50]}... (weights: v={runtime_vector_weight:.2f}, bm25={runtime_bm25_weight:.2f})")
             return ctx_df, response
         
         # Cache miss - perform full search
-        print(f"[Backend] Cache miss - performing full hybrid search (weights: v={runtime_vector_weight:.2f}, bm25={runtime_bm25_weight:.2f})")
+        logger.info(f"Cache miss - performing full hybrid search (weights: v={runtime_vector_weight:.2f}, bm25={runtime_bm25_weight:.2f})")
         
         # Get results from both engines
         bm25_docs = self.bm25_engine.search(query, self.config.bm25_top_k)
@@ -292,8 +295,8 @@ class HybridSearchEngine:
         vector_count = len([r for r in top if "vector" in r.metadata.get("found_by_engines", [])])
         both_count = len([r for r in top if len(r.metadata.get("found_by_engines", [])) > 1])
         
-        print(f"True Hybrid Search: {len(bm25_docs)} BM25 + {len(vec_df)} Vector → {len(hybrid_results)} unique → {len(top)} final")
-        print(f"Final results: {bm25_count} found by BM25, {vector_count} found by Vector, {both_count} found by both")
+        logger.info(f"True Hybrid Search: {len(bm25_docs)} BM25 + {len(vec_df)} Vector → {len(hybrid_results)} unique → {len(top)} final")
+        logger.info(f"Final results: {bm25_count} found by BM25, {vector_count} found by Vector, {both_count} found by both")
 
         # Generate response
         try:
@@ -304,6 +307,6 @@ class HybridSearchEngine:
             
             return ctx_df, response
         except Exception as e:
-            print(f"[Backend] Failed to generate response: {e}")
+            logger.error(f"Failed to generate response: {e}")
             # Return ctx_df and None so the caller can handle the synthesis
             return ctx_df, None
