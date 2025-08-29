@@ -10,6 +10,14 @@ from core.search.vector_search import VectorSearchEngine
 from core.processors.document_processor import DocumentProcessor, RAGApplication
 from config.settings import HybridSearchConfig
 
+# New clean architecture imports
+from core.services.clean_document_processor import (
+    CleanDocumentProcessor, VectorDocumentRepository, 
+    BM25IndexBuilder, CleanProcessingOrchestrator
+)
+from core.services.clean_search_engines import CleanSearchEngineFactory
+from core.database.vector_store import VectorStore
+
 logger = logging.getLogger(__name__)
 
 
@@ -84,6 +92,32 @@ class ImmutableAppContainer:
         stats = self.cache_service.get_cache_stats()
         stats["cache_available"] = self.cache_service.is_available()
         return stats
+    
+    # New clean architecture factory methods
+    def create_clean_processor(self) -> CleanDocumentProcessor:
+        """Create clean document processor with proper separation of concerns."""
+        return CleanDocumentProcessor()
+    
+    def create_vector_repository(self) -> VectorDocumentRepository:
+        """Create vector document repository."""
+        vector_store = VectorStore()
+        return VectorDocumentRepository(vector_store)
+    
+    def create_bm25_index_builder(self) -> BM25IndexBuilder:
+        """Create BM25 index builder."""
+        return BM25IndexBuilder(self.bm25_engine)
+    
+    def create_processing_orchestrator(self) -> CleanProcessingOrchestrator:
+        """Create complete processing orchestrator with all components."""
+        processor = self.create_clean_processor()
+        repository = self.create_vector_repository()
+        index_builder = self.create_bm25_index_builder()
+        return CleanProcessingOrchestrator(processor, repository, index_builder)
+    
+    def create_search_engine_factory(self) -> CleanSearchEngineFactory:
+        """Create search engine factory for clean architecture."""
+        vector_store = VectorStore()
+        return CleanSearchEngineFactory(vector_store, self.bm25_engine)
 
 
 def create_immutable_container(data_dir: str, pg_dsn: str) -> ImmutableAppContainer:
