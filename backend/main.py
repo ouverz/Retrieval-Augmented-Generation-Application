@@ -3,7 +3,7 @@ import logging
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 from backend.routers import query, ingest, init, cache
-from backend.dependencies import get_app_container
+from backend.dependencies import get_app_container, ImmutableContainerDep
 
 # Configure logging
 logging.basicConfig(
@@ -58,6 +58,30 @@ def health():
         return {
             "status": "error",
             "error": str(e),
+            "cache": {"error": "Unable to check cache status"}
+        }
+
+
+@app.get("/health/v2")
+def health_v2(container: ImmutableContainerDep):
+    """Thread-safe health check using immutable container."""
+    try:
+        cache_health = container.get_cache_health()
+        
+        return {
+            "status": "ok",
+            "service_ready": container.is_ready(),
+            "container_type": "immutable",
+            "thread_safe": True,
+            "cache": cache_health
+        }
+    except Exception as e:
+        logger.error(f"v2 Health check failed: {e}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "container_type": "immutable",
+            "thread_safe": True,
             "cache": {"error": "Unable to check cache status"}
         }
 
