@@ -70,7 +70,7 @@ def get_immutable_container(dsn: str = Depends(pg_dsn)) -> ImmutableAppContainer
     Create new immutable container instance for dependency injection.
     Thread-safe, no global state, fully testable.
     """
-    data_dir = os.getenv("DATA_DIR", "./data")
+    data_dir = os.getenv("DATA_DIR", "./data/documents")
     return create_immutable_container(data_dir=data_dir, pg_dsn=dsn)
 
 
