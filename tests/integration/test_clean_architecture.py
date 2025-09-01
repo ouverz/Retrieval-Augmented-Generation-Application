@@ -261,15 +261,32 @@ class TestCleanSearchEngines:
         
         # Should have 3 unique documents (1 overlapping + 2 unique)
         assert len(result.documents) == 3
-        assert result.metadata['search_type'] == 'hybrid'
-        assert result.metadata['vector_weight'] == 0.7
-        assert abs(result.metadata['keyword_weight'] - 0.3) < 0.0001
+        assert result.metadata['search_type'] == 'hybrid_rrf'
+        assert result.metadata['fusion_method'] == 'reciprocal_rank_fusion'
+        assert result.metadata['rrf_k_value'] == 60
         
-        # Check fusion metadata
+        # Check RRF fusion metadata
         for doc in result.documents:
-            assert 'hybrid_score' in doc.metadata
+            assert 'rrf_score' in doc.metadata
             assert 'vector_score' in doc.metadata  
             assert 'keyword_score' in doc.metadata
+            assert 'fusion_method' in doc.metadata
+            assert doc.metadata['fusion_method'] == 'reciprocal_rank_fusion'
+            # Check rank metadata (should be None or positive integer)
+            vector_rank = doc.metadata.get('vector_rank')
+            keyword_rank = doc.metadata.get('keyword_rank')
+            assert vector_rank is None or (isinstance(vector_rank, int) and vector_rank > 0)
+            assert keyword_rank is None or (isinstance(keyword_rank, int) and keyword_rank > 0)
+            
+        # The overlapping document should have highest RRF score due to appearing in both lists
+        same_content_docs = [doc for doc in result.documents if doc.page_content == "same content"]
+        assert len(same_content_docs) == 1
+        overlapping_doc = same_content_docs[0]
+        
+        # Should be first (highest RRF score) due to consensus
+        assert result.documents[0].page_content == "same content"
+        assert overlapping_doc.metadata['vector_rank'] == 1  # Rank 1 in vector results
+        assert overlapping_doc.metadata['keyword_rank'] == 1  # Rank 1 in keyword results
 
 
 class TestProcessingOrchestrator:
