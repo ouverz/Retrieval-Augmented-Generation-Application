@@ -70,19 +70,24 @@ class Settings(BaseModel):
 
 @dataclass
 class HybridSearchConfig:
-    """Configuration for hybrid search parameters"""
+    """Configuration for hybrid search using Reciprocal Rank Fusion (RRF).
+    
+    RRF combines rankings from different search methods without requiring
+    weight tuning. The rrf_k parameter controls the fusion behavior:
+    - Higher k values (e.g., 100) make the fusion more conservative
+    - Lower k values (e.g., 20) give more weight to top-ranked results
+    - Standard value of 60 provides balanced fusion
+    """
 
-    bm25_weight: float = 0.3
-    vector_weight: float = 0.7
-    bm25_top_k: int = 10
-    vector_top_k: int = 10
-    max_results: int = 20
+    rrf_k: int = 60  # RRF k parameter for rank fusion
+    bm25_top_k: int = 10  # Number of top BM25 results to retrieve
+    vector_top_k: int = 10  # Number of top vector results to retrieve
+    max_results: int = 20  # Maximum number of results to return
 
     def __post_init__(self):
-        """Validate weights sum to 1.0"""
-        total_weight = self.bm25_weight + self.vector_weight
-        if abs(total_weight - 1.0) > 0.001:
-            raise ValueError(f"Weights must sum to 1.0, got {total_weight}")
+        """Validate RRF parameters"""
+        if self.rrf_k < 1:
+            raise ValueError(f"rrf_k must be >= 1, got {self.rrf_k}")
 
 
 @lru_cache()
