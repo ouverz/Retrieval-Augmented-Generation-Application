@@ -102,7 +102,7 @@ class CacheService:
     
     def _config_hash(self, config) -> str:
         """Generate hash for hybrid search configuration."""
-        config_str = f"{config.bm25_weight}:{config.vector_weight}:{config.bm25_top_k}:{config.vector_top_k}"
+        config_str = f"{config.rrf_k}:{config.bm25_top_k}:{config.vector_top_k}:{config.max_results}"
         return hashlib.md5(config_str.encode()).hexdigest()[:8]
     
     def get_cached_query_result(self, query: str, top_k: int, config) -> Optional[tuple]:

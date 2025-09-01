@@ -9,11 +9,11 @@ class QueryRequest(BaseModel):
     filters: Optional[Dict[str, str]] = None
     top_k: int = Field(default=8, ge=1, le=100)
     session_id: Optional[str] = Field(default=None, description="Optional session ID for tracking")
-    vector_weight: Optional[float] = Field(
+    rrf_k: Optional[int] = Field(
         default=None, 
-        ge=0.0, 
-        le=1.0, 
-        description="Weight for vector search component (0.0-1.0). BM25 weight = 1.0 - vector_weight"
+        ge=1, 
+        le=1000, 
+        description="RRF k parameter for rank fusion (1-1000). Higher values make fusion more conservative"
     )
 
 
