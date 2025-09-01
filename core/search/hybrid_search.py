@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import List
 import pandas as pd
 import logging
+import time
 from langchain.schema import Document
 
 from core.search.bm25_search import BM25SearchEngine
@@ -14,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 class HybridSearchEngine:
-    """Combine BM25 + Vector scores, dedupe, rank, synthesize."""
+    """Hybrid search engine using Reciprocal Rank Fusion (RRF) to combine BM25 and Vector search results."""
 
     def __init__(
         self,
@@ -28,23 +29,17 @@ class HybridSearchEngine:
         self.cache_service = get_cache_service()
 
     def _score_bm25(self, docs: List[Document]) -> List[Document]:
+        """Score BM25 documents with rank-based scoring for RRF."""
         for i, d in enumerate(docs):
-            base_score = self.config.bm25_weight * (1.0 / (i + 1))
-            
             # Apply content quality penalty for citation-heavy chunks
             content = d.page_content or ""
             quality_penalty = self._calculate_content_quality_score(content)
             
-            # Final score with quality adjustment
-            s = base_score * quality_penalty
-            
             if not isinstance(d.metadata, dict):
                 d.metadata = {}
             d.metadata.update({
-                "score": s, 
                 "source_engine": "bm25", 
                 "rank": i + 1,
-                "base_bm25_score": base_score,
                 "content_quality_penalty": quality_penalty
             })
         return docs
@@ -81,25 +76,67 @@ class HybridSearchEngine:
         else:  # Clean content
             return 1.0
 
-    def _create_true_hybrid_scores(self, bm25_docs: List[Document], vec_df: pd.DataFrame, query: str, vector_weight: float = None, bm25_weight: float = None) -> List[Document]:
-        """Create true hybrid scores where each document gets both BM25 and Vector scores"""
+    def _calculate_rrf_score(self, bm25_rank: int = None, vector_rank: int = None, k: int = None) -> float:
+        """Calculate RRF score using Reciprocal Rank Fusion algorithm with detailed component tracking.
         
-        # Use provided weights or fall back to config defaults
-        effective_vector_weight = vector_weight if vector_weight is not None else self.config.vector_weight
-        effective_bm25_weight = bm25_weight if bm25_weight is not None else self.config.bm25_weight
+        RRF formula: score = sum(1 / (k + rank)) for each ranking
         
-        # DEBUG: Log document details to identify matching issues
-        logger.debug(f"BM25 docs ({len(bm25_docs)}):")
-        for i, doc in enumerate(bm25_docs[:3]):  # Show first 3
+        Args:
+            bm25_rank: Rank from BM25 search (1-indexed, None if not found)
+            vector_rank: Rank from vector search (1-indexed, None if not found) 
+            k: RRF constant (defaults to config.rrf_k)
+        
+        Returns:
+            Combined RRF score
+        """
+        if k is None:
+            k = self.config.rrf_k
+            
+        rrf_score = 0.0
+        bm25_contribution = 0.0
+        vector_contribution = 0.0
+        
+        if bm25_rank is not None:
+            bm25_contribution = 1.0 / (k + bm25_rank)
+            rrf_score += bm25_contribution
+            
+        if vector_rank is not None:
+            vector_contribution = 1.0 / (k + vector_rank)
+            rrf_score += vector_contribution
+            
+        return rrf_score
+
+    def _create_rrf_hybrid_scores(self, bm25_docs: List[Document], vec_df: pd.DataFrame, query: str) -> List[Document]:
+        """Create hybrid scores using Reciprocal Rank Fusion (RRF) algorithm with comprehensive logging."""
+        rrf_start_time = time.time()
+        
+        # Log RRF fusion initiation with structured data
+        logger.debug("Starting RRF fusion", extra={
+            "bm25_docs_count": len(bm25_docs),
+            "vector_docs_count": len(vec_df),
+            "rrf_k_value": self.config.rrf_k,
+            "query_preview": query[:50] + "..." if len(query) > 50 else query
+        })
+        
+        # DEBUG: Log first few document details for debugging
+        for i, doc in enumerate(bm25_docs[:3]):
             content_preview = (doc.page_content or "")[:100] + "..."
             doc_id = doc.metadata.get("id", "NO_ID")
-            logger.debug(f"  {i+1}. ID: {doc_id}, Content: {content_preview}")
+            logger.debug(f"BM25 doc {i+1}", extra={
+                "doc_id": doc_id,
+                "rank": i+1,
+                "content_preview": content_preview
+            })
         
-        logger.debug(f"Vector docs ({len(vec_df)}):")
-        for i, (_, row) in enumerate(vec_df.head(3).iterrows()):  # Show first 3
+        for i, (_, row) in enumerate(vec_df.head(3).iterrows()):
             content_preview = (row["content"] or "")[:100] + "..."
             doc_id = row.get("id", "NO_ID")
-            logger.debug(f"  {i+1}. ID: {doc_id}, Content: {content_preview}")
+            logger.debug(f"Vector doc {i+1}", extra={
+                "doc_id": doc_id,
+                "rank": i+1,
+                "distance": row.get("distance", "N/A"),
+                "content_preview": content_preview
+            })
         
         # Build lookup dictionaries for efficient access
         bm25_lookup = {}  # content_hash -> (rank, doc)
@@ -109,7 +146,7 @@ class HybridSearchEngine:
             if i < 3:  # Debug first few hashes
                 logger.debug(f"BM25 hash {i+1}: {content_hash}")
         
-        vector_lookup = {}  # content_hash -> (similarity, row)
+        vector_lookup = {}  # content_hash -> (similarity, row, rank)
         for i, (_, row) in enumerate(vec_df.iterrows()):
             content_hash = hash((row["content"] or "").strip().lower())
             distance = float(row["distance"])
@@ -127,27 +164,24 @@ class HybridSearchEngine:
         
         hybrid_results = []
         for content_hash in all_content_hashes:
-            # Get BM25 score
-            bm25_score = 0.0
+            # Initialize variables
             bm25_rank = None
+            vector_rank = None
             quality_penalty = 1.0
             found_by = []
+            vector_similarity = None
+            vector_distance = None
             
+            # Get BM25 information
             if content_hash in bm25_lookup:
                 rank, doc = bm25_lookup[content_hash]
                 content = doc.page_content or ""
                 quality_penalty = self._calculate_content_quality_score(content)
-                bm25_raw_score = 1.0 / rank
+                bm25_rank = rank
                 found_by.append("bm25")
                 base_doc = doc
-                bm25_rank = rank
             
-            # Get Vector score
-            vector_score = 0.0
-            vector_similarity = None
-            vector_distance = None
-            vector_rank = None
-            
+            # Get Vector information
             if content_hash in vector_lookup:
                 similarity, row, rank = vector_lookup[content_hash]
                 vector_similarity = similarity
@@ -163,53 +197,77 @@ class HybridSearchEngine:
                         metadata={"id": row["id"]}
                     )
             
-            # Apply appropriate weights based on which engines found the document
-            # This ensures single-engine documents aren't penalized by weight distribution
-            if len(found_by) == 1:
-                # Document found by only one engine - use full weight (1.0)
-                # This prevents artificial penalization of unique results
-                if "bm25" in found_by:
-                    bm25_score = 1.0 * bm25_raw_score * quality_penalty
-                if "vector" in found_by:
-                    vector_score = 1.0 * vector_distance
-            else:
-                # Document found by both engines - use configured weights
-                if "bm25" in found_by:
-                    bm25_score = effective_bm25_weight * bm25_raw_score * quality_penalty
-                if "vector" in found_by:
-                    vector_score = effective_vector_weight * vector_distance
+            # Calculate RRF score with detailed component tracking
+            rrf_score = self._calculate_rrf_score(bm25_rank, vector_rank)
             
-            # Calculate true hybrid score
-            hybrid_score = bm25_score + vector_score
+            # Apply quality penalty to final score
+            final_score = rrf_score * quality_penalty
             
-            # Create enhanced metadata
+            # Log RRF scoring details for first few documents for debugging
+            if len(hybrid_results) < 3:
+                logger.debug(f"RRF scoring #{len(hybrid_results) + 1}", extra={
+                    "raw_rrf_score": round(rrf_score, 6),
+                    "final_rrf_score": round(final_score, 6),
+                    "bm25_rank": bm25_rank,
+                    "vector_rank": vector_rank,
+                    "quality_penalty": round(quality_penalty, 3),
+                    "found_by_engines": found_by,
+                    "rrf_k_value": self.config.rrf_k,
+                    "content_preview": (base_doc.page_content or "")[:100] + "..." if base_doc.page_content else "[No content]"
+                })
+            
+            # Create enhanced metadata with RRF scoring information per requirements
             base_doc.metadata.update({
-                "hybrid_score": hybrid_score,
-                "bm25_score": bm25_score,
-                "vector_score": vector_score,
-                "bm25_rank": bm25_rank,
-                "vector_rank": vector_rank,
+                "rrf_score": final_score,  # Final RRF score
+                "raw_rrf_score": rrf_score,  # Raw RRF score before quality adjustment
+                "bm25_rank": bm25_rank,  # Position in BM25 results (if found)
+                "vector_rank": vector_rank,  # Position in Vector results (if found)
                 "vector_similarity": vector_similarity,
                 "vector_distance": vector_distance,
                 "content_quality_penalty": quality_penalty,
-                "found_by_engines": found_by,
-                "source_engine": "hybrid"  # Mark as true hybrid result
+                "found_by_engines": found_by,  # List of engines that found this document
+                "rrf_k_value": self.config.rrf_k,  # K parameter used for scoring
+                "source_engine": "rrf_hybrid",  # Mark as RRF hybrid result
+                "fusion_method": "reciprocal_rank_fusion"
             })
             
             hybrid_results.append(base_doc)
         
+        # Calculate and log RRF fusion completion metrics
+        rrf_time_ms = int((time.time() - rrf_start_time) * 1000)
+        
+        # Calculate agreement and ranking statistics
+        both_engines = len([r for r in hybrid_results if len(r.metadata.get("found_by_engines", [])) > 1])
+        bm25_only = len([r for r in hybrid_results if r.metadata.get("found_by_engines", []) == ["bm25"]])
+        vector_only = len([r for r in hybrid_results if r.metadata.get("found_by_engines", []) == ["vector"]])
+        
+        rrf_scores = [r.metadata.get("rrf_score", 0.0) for r in hybrid_results]
+        avg_rrf_score = sum(rrf_scores) / len(rrf_scores) if rrf_scores else 0.0
+        top_rrf_score = max(rrf_scores) if rrf_scores else 0.0
+        
+        logger.debug("RRF fusion completed", extra={
+            "rrf_processing_time_ms": rrf_time_ms,
+            "total_unique_documents": len(hybrid_results),
+            "both_engines_found": both_engines,
+            "bm25_only_found": bm25_only,
+            "vector_only_found": vector_only,
+            "agreement_percentage": round((both_engines / len(hybrid_results) * 100), 2) if hybrid_results else 0,
+            "avg_rrf_score": round(avg_rrf_score, 6),
+            "top_rrf_score": round(top_rrf_score, 6),
+            "rrf_k_used": self.config.rrf_k
+        })
+        
         return hybrid_results
 
     def _score_vector(self, df: pd.DataFrame) -> List[Document]:
+        """Score vector documents with rank-based scoring for RRF."""
         req = {"id", "content", "distance"}
         if not req.issubset(df.columns):
             raise ValueError(f"Vector results missing columns: {req - set(df.columns)}")
         out: List[Document] = []
         for i, row in df.iterrows():
             sim = 1.0 / (1.0 + float(row["distance"]))
-            s = self.config.vector_weight * float(row["distance"])  # Use distance for apples-to-apples comparison with BM25
             meta = {
-                "score": s,
                 "source_engine": "vector",
                 "id": row["id"],
                 "distance": float(row["distance"]),
@@ -247,29 +305,40 @@ class HybridSearchEngine:
         return pd.DataFrame(rows)
 
     async def search(self, query: str, top_k: int = None, remove_duplicates: bool = True, vector_weight: float = None):
+        """Search using Reciprocal Rank Fusion (RRF) to combine BM25 and vector results.
+        
+        Note: vector_weight parameter is maintained for API compatibility but not used in RRF.
+        RRF uses rank positions instead of weighted scores.
+        """
         # Use top_k if provided, otherwise fall back to config max_results
         final_limit = top_k if top_k is not None else self.config.max_results
         
-        # Calculate runtime weights - use provided weights or fall back to config
-        runtime_vector_weight = vector_weight if vector_weight is not None else self.config.vector_weight
-        runtime_bm25_weight = 1.0 - runtime_vector_weight
-        
-        # Create runtime config for caching (only if weights differ from default)
+        # For RRF, we use the config directly (no weight calculations needed)
         cache_config = self.config
-        if vector_weight is not None:
-            # Create a temporary config copy for cache key generation
-            from dataclasses import replace
-            cache_config = replace(self.config, vector_weight=runtime_vector_weight, bm25_weight=runtime_bm25_weight)
         
         # Check cache first
         cached_result = self.cache_service.get_cached_query_result(query, final_limit, cache_config)
         if cached_result is not None:
             ctx_df, response = cached_result
-            logger.info(f"Cache hit for query: {query[:50]}... (weights: v={runtime_vector_weight:.2f}, bm25={runtime_bm25_weight:.2f})")
+            logger.info("Cache hit for RRF hybrid search", extra={
+                "query_preview": query[:50] + "..." if len(query) > 50 else query,
+                "rrf_k_value": self.config.rrf_k,
+                "cached_results_count": len(ctx_df) if ctx_df is not None else 0,
+                "fusion_method": "reciprocal_rank_fusion"
+            })
             return ctx_df, response
         
-        # Cache miss - perform full search
-        logger.info(f"Cache miss - performing full hybrid search (weights: v={runtime_vector_weight:.2f}, bm25={runtime_bm25_weight:.2f})")
+        # Cache miss - perform full search with structured logging
+        logger.info("Cache miss - initiating RRF hybrid search", extra={
+            "query_length": len(query),
+            "query_preview": query[:100] + "..." if len(query) > 100 else query,
+            "final_limit": final_limit,
+            "rrf_k_value": self.config.rrf_k,
+            "bm25_top_k": self.config.bm25_top_k,
+            "vector_top_k": self.config.vector_top_k,
+            "deduplication_enabled": remove_duplicates,
+            "fusion_method": "reciprocal_rank_fusion"
+        })
         
         # Get results from both engines
         bm25_docs = self.bm25_engine.search(query, self.config.bm25_top_k)
@@ -277,26 +346,50 @@ class HybridSearchEngine:
             query, self.config.vector_top_k, return_dataframe=True
         )
         
-        # Create true hybrid scoring with runtime weights
-        hybrid_results = self._create_true_hybrid_scores(bm25_docs, vec_df, query, runtime_vector_weight, runtime_bm25_weight)
+        # Create RRF hybrid scoring 
+        hybrid_results = self._create_rrf_hybrid_scores(bm25_docs, vec_df, query)
         
         # Apply deduplication if requested
         if remove_duplicates:
             hybrid_results = self._dedupe(hybrid_results)
         
-        # Sort by true hybrid score
-        hybrid_results.sort(key=lambda d: d.metadata.get("hybrid_score", 0.0), reverse=True)
+        # Sort by RRF score
+        hybrid_results.sort(key=lambda d: d.metadata.get("rrf_score", 0.0), reverse=True)
         
         top = hybrid_results[:final_limit]
         ctx_df = self._to_df(top)
         
-        # Log hybrid search summary
+        # Calculate comprehensive RRF hybrid search metrics
         bm25_count = len([r for r in top if "bm25" in r.metadata.get("found_by_engines", [])])
         vector_count = len([r for r in top if "vector" in r.metadata.get("found_by_engines", [])])
         both_count = len([r for r in top if len(r.metadata.get("found_by_engines", [])) > 1])
         
-        logger.info(f"True Hybrid Search: {len(bm25_docs)} BM25 + {len(vec_df)} Vector → {len(hybrid_results)} unique → {len(top)} final")
+        # Calculate RRF score distribution for monitoring
+        rrf_scores = [r.metadata.get("rrf_score", 0.0) for r in top]
+        avg_rrf_score = sum(rrf_scores) / len(rrf_scores) if rrf_scores else 0.0
+        top_rrf_score = max(rrf_scores) if rrf_scores else 0.0
+        
+        # Log comprehensive RRF hybrid search completion with structured data
+        logger.info("RRF hybrid search completed", extra={
+            "input_bm25_results": len(bm25_docs),
+            "input_vector_results": len(vec_df),
+            "unique_results_after_fusion": len(hybrid_results),
+            "final_results_count": len(top),
+            "bm25_only_count": bm25_count - both_count,
+            "vector_only_count": vector_count - both_count,
+            "both_engines_count": both_count,
+            "engine_agreement_rate": round((both_count / len(top) * 100), 2) if top else 0,
+            "avg_rrf_score": round(avg_rrf_score, 6),
+            "top_rrf_score": round(top_rrf_score, 6),
+            "rrf_k_value": self.config.rrf_k,
+            "fusion_method": "reciprocal_rank_fusion",
+            "deduplication_applied": remove_duplicates
+        })
+        
+        # Legacy log messages for compatibility
+        logger.info(f"RRF Hybrid Search: {len(bm25_docs)} BM25 + {len(vec_df)} Vector → {len(hybrid_results)} unique → {len(top)} final")
         logger.info(f"Final results: {bm25_count} found by BM25, {vector_count} found by Vector, {both_count} found by both")
+        logger.info(f"RRF parameters: k={self.config.rrf_k}")
 
         # Generate response
         try:
