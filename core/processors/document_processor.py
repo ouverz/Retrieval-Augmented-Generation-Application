@@ -48,22 +48,29 @@ class DocumentProcessor:
         return all_docs
 
     def process_single_pdf(self, file_path: str) -> pd.DataFrame:
+        import logging
+        logger = logging.getLogger(__name__)
+        
         try:
             meta = extract_metadata_with_pypdf(file_path)
-        except Exception:
+        except Exception as e:
+            logger.error(f"Failed to extract metadata from {file_path}: {e}")
             return pd.DataFrame()
 
         try:
             result = self.converter.convert(source=file_path)
             doc = result.document
-        except Exception:
+        except Exception as e:
+            logger.error(f"Failed to convert document {file_path}: {e}")
             return pd.DataFrame()
 
         try:
             chunks = list(self.chunker.chunk(doc))
             if not chunks:
+                logger.warning(f"No chunks generated for {file_path}")
                 return pd.DataFrame()
-        except Exception:
+        except Exception as e:
+            logger.error(f"Failed to chunk document {file_path}: {e}")
             return pd.DataFrame()
 
         try:
@@ -74,13 +81,19 @@ class DocumentProcessor:
             if isinstance(df, pd.DataFrame) and not df.empty:
                 ready = VectorSearchEngine.apply_prepare_record(df)
                 vec_engine.upsert_records(ready)
-        except Exception:
+                logger.info(f"Successfully processed {file_path}: {len(df)} chunks")
+            else:
+                logger.warning(f"Empty DataFrame returned for {file_path}")
+                df = pd.DataFrame()
+        except Exception as e:
+            logger.error(f"Failed to create embeddings for {file_path}: {e}")
             df = pd.DataFrame()
 
         try:
-            self.bm25.add_chunks(file_path, chunks)
-        except Exception:
-            pass
+            if self.bm25 is not None:
+                self.bm25.add_chunks(file_path, chunks)
+        except Exception as e:
+            logger.error(f"Failed to add chunks to BM25 for {file_path}: {e}")
 
         return df
 

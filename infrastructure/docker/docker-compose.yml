@@ -1,6 +1,8 @@
 services:
   timescaledb:
     image: timescale/timescaledb-ha:pg16
+    env_file:
+      - path: ../../.env  #path to .env file in project root
     container_name: timescaledb
     environment:
       - POSTGRES_DB=postgres
