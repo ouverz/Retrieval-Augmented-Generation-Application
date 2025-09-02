@@ -6,7 +6,7 @@ Pure frontend that communicates with FastAPI backend
 import streamlit as st
 import requests
 import pandas as pd
-from typing import Dict, Any
+from typing import Dict, Any, List
 import time
 
 
@@ -58,12 +58,24 @@ def get_init_status() -> Dict[str, Any]:
     return make_api_request("/init/status")
 
 
-def query_system(query: str, top_k: int = 8, vector_weight: float = None) -> Dict[str, Any]:
+def query_system(query: str, top_k: int = 8, rrf_k: int = None, session_id: str = None) -> Dict[str, Any]:
     """Query the RAG system"""
     payload = {"query": query, "top_k": top_k}
-    if vector_weight is not None:
-        payload["vector_weight"] = vector_weight
+    if rrf_k is not None:
+        payload["rrf_k"] = rrf_k
+    if session_id is not None:
+        payload["session_id"] = session_id
     return make_api_request("/query", "POST", payload)
+
+
+def create_session(user_id: str = "streamlit_user") -> Dict[str, Any]:
+    """Create a new session"""
+    return make_api_request("/cache/session", "POST", {"user_id": user_id})
+
+
+def get_session(session_id: str) -> Dict[str, Any]:
+    """Get session data"""
+    return make_api_request(f"/cache/session/{session_id}")
 
 
 def upload_document(file) -> Dict[str, Any]:
@@ -71,6 +83,246 @@ def upload_document(file) -> Dict[str, Any]:
     # Note: This would need to be implemented differently for file uploads
     # For now, just return a placeholder
     return {"success": False, "error": "File upload not implemented in frontend yet"}
+
+
+def get_quality_color(quality: str) -> str:
+    """Get color based on quality level"""
+    color_map = {
+        "Excellent": "#22c55e",  # Green
+        "Good": "#3b82f6",      # Blue  
+        "Fair": "#f59e0b",      # Amber
+        "Poor": "#ef4444"       # Red
+    }
+    return color_map.get(quality, "#6b7280")  # Default gray
+
+
+def get_quality_emoji(quality: str) -> str:
+    """Get emoji based on quality level"""
+    emoji_map = {
+        "Excellent": "🟢",
+        "Good": "🔵",
+        "Fair": "🟡", 
+        "Poor": "🔴"
+    }
+    return emoji_map.get(quality, "⚪")
+
+
+def display_evaluation_metrics(evaluation_metrics: Dict[str, Any], query_history: List[Dict[str, Any]] = None):
+    """Display evaluation metrics in user-friendly format"""
+    st.markdown('<div class="evaluation-header">📊 How Well Did We Find What You Were Looking For?</div>', unsafe_allow_html=True)
+    
+    # Extract metrics
+    mrr = evaluation_metrics.get("mrr")
+    precision_at_k = evaluation_metrics.get("precision_at_k", {})
+    map_score = evaluation_metrics.get("map_score")
+    recall_at_k = evaluation_metrics.get("recall_at_k", {})
+    ndcg_at_k = evaluation_metrics.get("ndcg_at_k", {})
+    
+    # Main metrics cards
+    cols = st.columns(3)
+    
+    # MRR Card
+    if mrr:
+        with cols[0]:
+            quality_color = get_quality_color(mrr.get("interpretation", "Fair"))
+            quality_emoji = get_quality_emoji(mrr.get("interpretation", "Fair"))
+            value = mrr.get('value', 0)
+            progress_width = int(value * 100)
+            st.markdown(f"""
+            <div class="metric-card">
+                <div class="metric-value" style="color: {quality_color};">
+                    {quality_emoji} {value:.3f}
+                </div>
+                <div class="metric-label">Answer Ranking Quality</div>
+                <div class="metric-progress">
+                    <div class="metric-progress-bar" style="width: {progress_width}%; background-color: {quality_color};"></div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+    # MAP Card
+    if map_score:
+        with cols[1]:
+            quality_color = get_quality_color(map_score.get("interpretation", "Fair"))
+            quality_emoji = get_quality_emoji(map_score.get("interpretation", "Fair"))
+            value = map_score.get('value', 0)
+            progress_width = int(value * 100)
+            st.markdown(f"""
+            <div class="metric-card">
+                <div class="metric-value" style="color: {quality_color};">
+                    {quality_emoji} {value:.3f}
+                </div>
+                <div class="metric-label">Overall Search Quality</div>
+                <div class="metric-progress">
+                    <div class="metric-progress-bar" style="width: {progress_width}%; background-color: {quality_color};"></div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+    
+    # Precision@K Card (use most common K value)
+    if precision_at_k:
+        with cols[2]:
+            # Find the most relevant K value (prefer 5, then 3, then 1, then first available)
+            preferred_ks = [5, 3, 1]
+            display_k = None
+            display_precision = None
+            
+            for k in preferred_ks:
+                if str(k) in precision_at_k:
+                    display_k = k
+                    display_precision = precision_at_k[str(k)]
+                    break
+            
+            if not display_precision and precision_at_k:
+                # Use first available if preferred not found
+                first_k = list(precision_at_k.keys())[0]
+                display_k = int(first_k)
+                display_precision = precision_at_k[first_k]
+                
+            if display_precision:
+                quality_color = get_quality_color(display_precision.get("interpretation", "Fair"))
+                quality_emoji = get_quality_emoji(display_precision.get("interpretation", "Fair"))
+                value = display_precision.get('value', 0)
+                progress_width = int(value * 100)
+                st.markdown(f"""
+                <div class="metric-card">
+                    <div class="metric-value" style="color: {quality_color};">
+                        {quality_emoji} {value:.3f}
+                    </div>
+                    <div class="metric-label">Top {display_k} Results Accuracy</div>
+                    <div class="metric-progress">
+                        <div class="metric-progress-bar" style="width: {progress_width}%; background-color: {quality_color};"></div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+    
+    # Expandable detailed explanations
+    with st.expander("🔍 What Do These Metrics Mean?"):
+        if mrr:
+            st.markdown(f"""
+            **Answer Ranking Quality (MRR: {mrr.get('value', 0):.3f})** {get_quality_emoji(mrr.get('interpretation', 'Fair'))}
+            
+            {mrr.get('description', 'Measures how well we rank the most relevant results first.')}
+            
+            **Your Result:** {mrr.get('interpretation', 'Fair')} - This means the system is performing {mrr.get('interpretation', 'fair').lower()} at putting the best answers first.
+            """)
+            st.markdown("---")
+            
+        if map_score:
+            st.markdown(f"""
+            **Overall Search Quality (MAP: {map_score.get('value', 0):.3f})** {get_quality_emoji(map_score.get('interpretation', 'Fair'))}
+            
+            {map_score.get('description', 'Measures the overall quality of search results across all positions.')}
+            
+            **Your Result:** {map_score.get('interpretation', 'Fair')} - The system's overall search performance is {map_score.get('interpretation', 'fair').lower()}.
+            """)
+            st.markdown("---")
+            
+        if precision_at_k and display_precision:
+            st.markdown(f"""
+            **Top {display_k} Results Accuracy (P@{display_k}: {display_precision.get('value', 0):.3f})** {get_quality_emoji(display_precision.get('interpretation', 'Fair'))}
+            
+            {display_precision.get('description', f'Measures what fraction of the top {display_k} results are actually relevant to your question.')}
+            
+            **Your Result:** {display_precision.get('interpretation', 'Fair')} - {display_precision.get('interpretation', 'Fair')} accuracy in the top results.
+            """)
+    
+    # Additional metrics in collapsible section
+    additional_metrics_available = bool(recall_at_k or ndcg_at_k or len(precision_at_k) > 1)
+    
+    if additional_metrics_available:
+        with st.expander("📈 Additional Performance Metrics"):
+            
+            # Show all Precision@K values
+            if len(precision_at_k) > 1:
+                st.markdown("**Precision at Different Result Counts:**")
+                precision_cols = st.columns(min(len(precision_at_k), 4))
+                for i, (k, p_result) in enumerate(precision_at_k.items()):
+                    if i < len(precision_cols):
+                        with precision_cols[i]:
+                            quality_color = get_quality_color(p_result.get("interpretation", "Fair"))
+                            st.markdown(f"""
+                            <div style="text-align: center; padding: 0.5rem;">
+                                <div style="color: {quality_color}; font-size: 1.2rem; font-weight: bold;">
+                                    {p_result.get('value', 0):.3f}
+                                </div>
+                                <div style="font-size: 0.8rem; color: #a0aec0;">
+                                    Top {k} Results
+                                </div>
+                            </div>
+                            """, unsafe_allow_html=True)
+            
+            # Show Recall@K if available
+            if recall_at_k:
+                st.markdown("---")
+                st.markdown("**Recall at Different Result Counts:**")
+                recall_cols = st.columns(min(len(recall_at_k), 4))
+                for i, (k, r_result) in enumerate(recall_at_k.items()):
+                    if i < len(recall_cols):
+                        with recall_cols[i]:
+                            quality_color = get_quality_color(r_result.get("interpretation", "Fair"))
+                            st.markdown(f"""
+                            <div style="text-align: center; padding: 0.5rem;">
+                                <div style="color: {quality_color}; font-size: 1.2rem; font-weight: bold;">
+                                    {r_result.get('value', 0):.3f}
+                                </div>
+                                <div style="font-size: 0.8rem; color: #a0aec0;">
+                                    Recall@{k}
+                                </div>
+                            </div>
+                            """, unsafe_allow_html=True)
+            
+            # Show NDCG@K if available  
+            if ndcg_at_k:
+                st.markdown("---")
+                st.markdown("**Normalized Discounted Cumulative Gain:**")
+                ndcg_cols = st.columns(min(len(ndcg_at_k), 4))
+                for i, (k, ndcg_result) in enumerate(ndcg_at_k.items()):
+                    if i < len(ndcg_cols):
+                        with ndcg_cols[i]:
+                            quality_color = get_quality_color(ndcg_result.get("interpretation", "Fair"))
+                            st.markdown(f"""
+                            <div style="text-align: center; padding: 0.5rem;">
+                                <div style="color: {quality_color}; font-size: 1.2rem; font-weight: bold;">
+                                    {ndcg_result.get('value', 0):.3f}
+                                </div>
+                                <div style="font-size: 0.8rem; color: #a0aec0;">
+                                    NDCG@{k}
+                                </div>
+                            </div>
+                            """, unsafe_allow_html=True)
+    
+    # Historical metrics tracking
+    if query_history and len(query_history) > 1:
+        with st.expander("📈 Session Performance Trends"):
+            st.markdown("**Performance Over Your Recent Queries:**")
+            
+            # Extract historical data
+            queries = [q['query'][:30] + "..." if len(q['query']) > 30 else q['query'] for q in query_history]
+            confidences = [q.get('confidence', 0) for q in query_history]
+            
+            # Create simple metrics overview
+            avg_confidence = sum(confidences) / len(confidences) if confidences else 0
+            queries_with_context = sum(1 for q in query_history if q.get('enough_context', False))
+            context_percentage = (queries_with_context / len(query_history)) * 100 if query_history else 0
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Avg Confidence", f"{avg_confidence:.2f}", f"{confidences[-1] - avg_confidence:+.2f}" if len(confidences) > 1 else None)
+            with col2:
+                st.metric("Queries This Session", len(query_history))
+            with col3:
+                st.metric("Context Success Rate", f"{context_percentage:.0f}%")
+            
+            # Show recent query list
+            if len(query_history) > 1:
+                st.markdown("**Recent Queries:**")
+                for i, q in enumerate(reversed(query_history[-5:]), 1):  # Show last 5 queries
+                    quality_emoji = "✅" if q.get('enough_context') else "⚠️"
+                    confidence = q.get('confidence', 0)
+                    st.write(f"{i}. {quality_emoji} {q['query'][:50]}... (Confidence: {confidence:.2f})")
+    
+    st.markdown("---")
 
 
 # Streamlit UI
@@ -216,6 +468,55 @@ def main():
         .stMetric [data-testid="metric-container"] {
             background-color: transparent;
         }
+        
+        /* Evaluation metrics specific styling */
+        .evaluation-header {
+            color: #ffffff;
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            text-align: center;
+        }
+        
+        .quality-excellent { color: #22c55e !important; }
+        .quality-good { color: #3b82f6 !important; }
+        .quality-fair { color: #f59e0b !important; }
+        .quality-poor { color: #ef4444 !important; }
+        
+        /* Mobile responsive adjustments */
+        @media (max-width: 768px) {
+            .metric-card {
+                margin: 0.25rem;
+                padding: 1rem;
+            }
+            
+            .metric-value {
+                font-size: 1.5rem;
+            }
+            
+            .main-title {
+                font-size: 2rem;
+            }
+            
+            .description {
+                font-size: 1rem;
+            }
+        }
+        
+        /* Progress bar styling for metrics */
+        .metric-progress {
+            width: 100%;
+            background-color: #4a5568;
+            border-radius: 4px;
+            height: 8px;
+            margin-top: 0.5rem;
+        }
+        
+        .metric-progress-bar {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.3s ease;
+        }
     </style>
     """, unsafe_allow_html=True)
 
@@ -225,11 +526,10 @@ def main():
         <h1 class="main-title">🔍 RAG System</h1>
         <div class="description">
             <strong>Retrieval-Augmented Generation (RAG)</strong> combines the power of large language models with your document knowledge base. 
-            This system intelligently searches through your uploaded documents using both semantic (vector) and keyword (BM25) search, 
-            then synthesizes accurate, contextual answers with proper citations. 
+            This system intelligently searches through your uploaded documents using both semantic (vector) and keyword (BM25) search 
+            combined with Reciprocal Rank Fusion (RRF), then synthesizes accurate, contextual answers with proper citations. 
             <br><br>
             <strong>How it works:</strong> Upload PDFs → System processes and indexes content → Ask questions → Get AI-powered answers backed by your documents.
-            Adjust the search weights below to fine-tune between semantic understanding and exact keyword matching for optimal results.
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -318,67 +618,87 @@ def main():
         Query: {API_BASE_URL}/query
         """)
 
-    # Main interface
-    col1, col2 = st.columns([2, 1])
+    # Check system readiness first
+    status_result = get_init_status()
+    system_ready = False
+    if status_result["success"]:
+        system_ready = status_result["data"]["status"] == "completed"
 
-    with col1:
-        st.header("💬 Query Interface")
-
-        # Check system readiness first
-        status_result = get_init_status()
-        system_ready = False
-        if status_result["success"]:
-            system_ready = status_result["data"]["status"] == "completed"
-
-        if not system_ready:
-            st.warning(
-                "⚠️ System not ready. Please initialize the system first using the sidebar."
-            )
-            st.stop()
-
-        # Query input
-        query = st.text_input(
-            "Enter your question:",
-            placeholder="Ask something about baby sleep research...",
-            key="query_input",
+    if not system_ready:
+        st.warning(
+            "⚠️ System not ready. Please initialize the system first using the sidebar."
         )
+        st.stop()
 
-        # Weight controls - styled with custom components
-        st.markdown("### ⚖️ Search Weight Configuration")
-        
-        col_weight, col_display = st.columns([3, 2])
-        
-        with col_weight:
-            vector_weight = st.slider(
-                "Vector Search Weight",
-                min_value=0.0,
-                max_value=1.0,
-                value=0.7,  # Default value matching backend
-                step=0.05,
-                help="Adjust the balance between semantic (vector) and keyword (BM25) search. Higher values favor semantic similarity."
-            )
-        
-        with col_display:
-            bm25_weight = 1.0 - vector_weight
-            st.markdown(f"""
-            <div class="weight-display">
-                <div class="weight-title">Current Weights</div>
-                <div class="weight-item">🔍 Vector: {vector_weight:.2f}</div>
-                <div class="weight-item">📝 BM25: {bm25_weight:.2f}</div>
-            </div>
-            """, unsafe_allow_html=True)
+    # Initialize session for historical metrics tracking
+    if 'session_id' not in st.session_state:
+        session_result = create_session()
+        if session_result["success"]:
+            st.session_state.session_id = session_result["data"]["session_id"]
+            st.session_state.query_history = []
+        else:
+            st.session_state.session_id = None
 
-        # Query settings  
-        with st.expander("⚙️ Advanced Query Settings"):
+    # 2. Query input
+    query = st.text_input(
+        "Enter your question:",
+        placeholder="Ask something about baby sleep research...",
+        key="query_input",
+    )
+
+    # 3. Search button (initial - will be updated with logic later)
+    search_button_placeholder = st.empty()
+
+    # 4. Advanced Query Settings
+    with st.expander("⚙️ Advanced Query Settings"):
+        col_topk, col_eval = st.columns(2)
+        
+        with col_topk:
             top_k = st.slider(
                 "Number of results to retrieve", min_value=1, max_value=20, value=8
             )
+        
+        with col_eval:
+            show_evaluation = st.checkbox(
+                "Show evaluation metrics",
+                value=True,
+                help="Display performance metrics like MRR, Precision@K, and MAP for query results"
+            )
 
+    # 5. RRF Configuration - COMMENTED OUT FOR NOW
+    # st.markdown("### ⚖️ RRF Configuration")
+    # 
+    # col_rrf, col_display = st.columns([3, 2])
+    # 
+    # with col_rrf:
+    #     rrf_k = st.slider(
+    #         "RRF K Parameter",
+    #         min_value=1,
+    #         max_value=200,
+    #         value=60,  # Default value matching backend
+    #         step=5,
+    #         help="Reciprocal Rank Fusion k parameter. Higher values make rank fusion more conservative (less influence from lower-ranked results)."
+    #     )
+    # 
+    # with col_display:
+    #     st.markdown(f"""
+    #     <div class="weight-display">
+    #         <div class="weight-title">RRF Settings</div>
+    #         <div class="weight-item">🔢 K Value: {rrf_k}</div>
+    #         <div class="weight-item">📊 Fusion: Reciprocal Rank</div>
+    #     </div>
+    #     """, unsafe_allow_html=True)
+    
+    # Set default RRF k value when configuration is commented out
+    rrf_k = 60  # Default backend value
+
+    # Update search button with actual button
+    with search_button_placeholder.container():
         if st.button("🔍 Search", disabled=not query or not query.strip()):
             start_time = time.time()
 
             with st.spinner("Searching and synthesizing answer..."):
-                result = query_system(query, top_k=top_k, vector_weight=vector_weight)
+                result = query_system(query, top_k=top_k, rrf_k=rrf_k, session_id=st.session_state.get('session_id'))
 
             elapsed_time = time.time() - start_time
 
@@ -386,13 +706,88 @@ def main():
                 data = result["data"]
                 st.success("✅ Query completed successfully!")
 
-                # Display answer
-                st.subheader("📝 Answer")
+                # 6. Evaluation Metrics Display
+                evaluation_metrics = data.get("evaluation_metrics")
+                if evaluation_metrics and show_evaluation:
+                    # Store metrics in session history
+                    if 'query_history' not in st.session_state:
+                        st.session_state.query_history = []
+                    
+                    # Add current query metrics to history
+                    query_entry = {
+                        'query': query,
+                        'timestamp': time.time(),
+                        'evaluation_metrics': evaluation_metrics,
+                        'confidence': data.get("confidence", 0),
+                        'enough_context': data.get("enough_context", False)
+                    }
+                    st.session_state.query_history.append(query_entry)
+                    
+                    # Keep only last 10 queries for performance
+                    if len(st.session_state.query_history) > 10:
+                        st.session_state.query_history = st.session_state.query_history[-10:]
+                    
+                    display_evaluation_metrics(evaluation_metrics, st.session_state.query_history)
+
+                # 7. Search Results Summary (moved from breakdown expander)
+                if data.get("results_table"):
+                    results_data = data["results_table"]
+                    total_results = len(results_data)
+                    bm25_found = len([
+                        r for r in results_data
+                        if "bm25" in r.get("engines", "")
+                    ])
+                    vector_found = len([
+                        r for r in results_data
+                        if "vector" in r.get("engines", "")
+                    ])
+                    both_engines = len([
+                        r for r in results_data
+                        if "+" in r.get("engines", "")
+                    ])
+
+                    st.markdown("### 🔍 Search Results Summary")
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    with col1:
+                        st.markdown(f"""
+                        <div class="metric-card">
+                            <div class="metric-value">{total_results}</div>
+                            <div class="metric-label">Total Results</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    
+                    with col2:
+                        st.markdown(f"""
+                        <div class="metric-card">
+                            <div class="metric-value">{bm25_found}</div>
+                            <div class="metric-label">Found by BM25</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    
+                    with col3:
+                        st.markdown(f"""
+                        <div class="metric-card">
+                            <div class="metric-value">{vector_found}</div>
+                            <div class="metric-label">Found by Vector</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    
+                    with col4:
+                        st.markdown(f"""
+                        <div class="metric-card">
+                            <div class="metric-value">{both_engines}</div>
+                            <div class="metric-label">Found by Both</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                # 8. Answer
+                st.markdown("### 📝 Answer")
                 st.write(data["answer"])
 
-                # Metrics - Custom styled cards
+                # 9. Query Performance (removed API Latency column)
                 st.markdown("### 📊 Query Performance")
-                col_conf, col_ctx, col_time, col_lat = st.columns(4)
+                col_conf, col_ctx, col_time = st.columns(3)
                 
                 with col_conf:
                     confidence_val = data['confidence']
@@ -419,16 +814,8 @@ def main():
                         <div class="metric-label">Query Time</div>
                     </div>
                     """, unsafe_allow_html=True)
-                
-                with col_lat:
-                    st.markdown(f"""
-                    <div class="metric-card">
-                        <div class="metric-value">{data.get('latency_ms', 0)}ms</div>
-                        <div class="metric-label">API Latency</div>
-                    </div>
-                    """, unsafe_allow_html=True)
 
-                # Additional details
+                # 10. Additional details (keep as expandable sections)
                 with st.expander("🧠 Thought Process"):
                     for i, thought in enumerate(data.get("thought_process", []), 1):
                         st.write(f"{i}. {thought}")
@@ -464,14 +851,24 @@ def main():
                             ):
                                 st.json(citation)
 
-                # Search results breakdown table
+                # Search Results Breakdown (with filtered columns)
                 if data.get("results_table"):
                     with st.expander("📊 Search Results Breakdown"):
                         results_df = pd.DataFrame(data["results_table"])
 
+                        # Filter to only the requested columns
+                        filtered_columns = [
+                            "rank", "source_id", "content_preview", "engines", 
+                            "bm25_rank", "vector_rank", "vector_similarity", "distance"
+                        ]
+                        
+                        # Only include columns that exist in the dataframe
+                        available_columns = [col for col in filtered_columns if col in results_df.columns]
+                        filtered_df = results_df[available_columns]
+
                         # Style the dataframe for better readability
                         st.dataframe(
-                            results_df,
+                            filtered_df,
                             column_config={
                                 "rank": st.column_config.NumberColumn(
                                     "Rank", width="small"
@@ -482,21 +879,6 @@ def main():
                                 "content_preview": st.column_config.TextColumn(
                                     "Content Preview", width="large"
                                 ),
-                                "hybrid_score": st.column_config.NumberColumn(
-                                    "True Hybrid Score", format="%.4f", width="small"
-                                ),
-                                "bm25_score": st.column_config.NumberColumn(
-                                    "BM25 Component", format="%.4f", width="small"
-                                ),
-                                "vector_score": st.column_config.NumberColumn(
-                                    "Vector Component", format="%.4f", width="small"
-                                ),
-                                "vector_similarity": st.column_config.NumberColumn(
-                                    "Vector Similarity", format="%.4f", width="small"
-                                ),
-                                "quality_penalty": st.column_config.NumberColumn(
-                                    "Quality Penalty", format="%.2f", width="small"
-                                ),
                                 "engines": st.column_config.TextColumn(
                                     "Found By", width="small"
                                 ),
@@ -506,6 +888,9 @@ def main():
                                 "vector_rank": st.column_config.NumberColumn(
                                     "Vector Rank", width="small"
                                 ),
+                                "vector_similarity": st.column_config.NumberColumn(
+                                    "Vector Similarity", format="%.4f", width="small"
+                                ),
                                 "distance": st.column_config.NumberColumn(
                                     "Vector Distance", format="%.4f", width="small"
                                 ),
@@ -513,66 +898,6 @@ def main():
                             hide_index=True,
                             use_container_width=True,
                         )
-
-                        # Summary stats for true hybrid results
-                        total_results = len(data["results_table"])
-                        bm25_found = len(
-                            [
-                                r
-                                for r in data["results_table"]
-                                if "bm25" in r.get("engines", "")
-                            ]
-                        )
-                        vector_found = len(
-                            [
-                                r
-                                for r in data["results_table"]
-                                if "vector" in r.get("engines", "")
-                            ]
-                        )
-                        both_engines = len(
-                            [
-                                r
-                                for r in data["results_table"]
-                                if "+" in r.get("engines", "")
-                            ]
-                        )
-
-                        # Search results summary with custom styling
-                        st.markdown("#### 🔍 Search Results Summary")
-                        col1, col2, col3, col4 = st.columns(4)
-                        
-                        with col1:
-                            st.markdown(f"""
-                            <div class="metric-card">
-                                <div class="metric-value">{total_results}</div>
-                                <div class="metric-label">Total Results</div>
-                            </div>
-                            """, unsafe_allow_html=True)
-                        
-                        with col2:
-                            st.markdown(f"""
-                            <div class="metric-card">
-                                <div class="metric-value">{bm25_found}</div>
-                                <div class="metric-label">Found by BM25</div>
-                            </div>
-                            """, unsafe_allow_html=True)
-                        
-                        with col3:
-                            st.markdown(f"""
-                            <div class="metric-card">
-                                <div class="metric-value">{vector_found}</div>
-                                <div class="metric-label">Found by Vector</div>
-                            </div>
-                            """, unsafe_allow_html=True)
-                        
-                        with col4:
-                            st.markdown(f"""
-                            <div class="metric-card">
-                                <div class="metric-value">{both_engines}</div>
-                                <div class="metric-label">Found by Both</div>
-                            </div>
-                            """, unsafe_allow_html=True)
 
                 # Technical details
                 with st.expander("🔬 Technical Details"):
@@ -584,8 +909,7 @@ def main():
                             ),
                             "query_settings": {
                                 "top_k": top_k,
-                                "vector_weight": vector_weight,
-                                "bm25_weight": 1.0 - vector_weight
+                                "rrf_k": rrf_k  # Using default value when UI config is disabled
                             },
                         }
                     )
@@ -593,50 +917,40 @@ def main():
             else:
                 st.error(f"❌ Query failed: {result['error']}")
 
-    with col2:
-        # System Status with custom styling
+    # 11. Server Status (moved from sidebar to main content)
+    st.markdown("---")  # Add separator
+    st.markdown("### 📊 System Status")
+    
+    # Quick health check display
+    if check_health():
         st.markdown("""
-        <div style="background-color: #2d3748; padding: 1.5rem; border-radius: 10px; border: 1px solid #4a5568; margin-bottom: 1rem;">
-            <h3 style="color: #ff6b35; margin-top: 0;">📊 System Status</h3>
-        """, unsafe_allow_html=True)
-
-        # Quick health check display
-        if check_health():
-            st.markdown("""
-            <div style="background-color: #22543d; color: #68d391; padding: 1rem; border-radius: 8px; margin: 1rem 0; text-align: center;">
-                🟢 <strong>Server Online</strong>
-            </div>
-            """, unsafe_allow_html=True)
-        else:
-            st.markdown("""
-            <div style="background-color: #742a2a; color: #fc8181; padding: 1rem; border-radius: 8px; margin: 1rem 0; text-align: center;">
-                🔴 <strong>Server Offline</strong>
-            </div>
-            """, unsafe_allow_html=True)
-
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        # Instructions with custom styling
-        st.markdown("""
-        <div style="background-color: #2d3748; padding: 1.5rem; border-radius: 10px; border: 1px solid #4a5568;">
-            <h3 style="color: #ff6b35; margin-top: 0;">ℹ️ Quick Start Guide</h3>
-            <div style="color: #a0aec0; line-height: 1.6;">
-                <p><strong style="color: #ffffff;">1. Start FastAPI Server:</strong><br>
-                <code style="background-color: #1a1d29; padding: 0.5rem; border-radius: 4px; display: block; margin: 0.5rem 0;">
-                uvicorn backend.main:app --reload
-                </code></p>
-                
-                <p><strong style="color: #ffffff;">2. Initialize System:</strong><br>
-                Use the sidebar controls to process your documents</p>
-                
-                <p><strong style="color: #ffffff;">3. Configure Search:</strong><br>
-                Adjust the weight slider to balance semantic vs keyword search</p>
-                
-                <p><strong style="color: #ffffff;">4. Ask Questions:</strong><br>
-                Get AI-powered answers with citations from your documents</p>
-            </div>
+        <div style="background-color: #22543d; color: #68d391; padding: 1rem; border-radius: 8px; margin: 1rem 0; text-align: center;">
+            🟢 <strong>Server Online</strong>
         </div>
         """, unsafe_allow_html=True)
+    else:
+        st.markdown("""
+        <div style="background-color: #742a2a; color: #fc8181; padding: 1rem; border-radius: 8px; margin: 1rem 0; text-align: center;">
+            🔴 <strong>Server Offline</strong>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # 12. Quick Start Guide (moved from sidebar to main content)
+    st.markdown("### ℹ️ Quick Start Guide")
+    st.markdown("""
+    <div style="background-color: #2d3748; padding: 1.5rem; border-radius: 10px; border: 1px solid #4a5568; color: #a0aec0; line-height: 1.6;">
+        <p><strong style="color: #ffffff;">1. Start FastAPI Server:</strong><br>
+        <code style="background-color: #1a1d29; padding: 0.5rem; border-radius: 4px; display: block; margin: 0.5rem 0;">
+        uvicorn backend.main:app --reload
+        </code></p>
+        
+        <p><strong style="color: #ffffff;">2. Initialize System:</strong><br>
+        Use the sidebar controls to process your documents</p>
+        
+        <p><strong style="color: #ffffff;">3. Ask Questions:</strong><br>
+        Get AI-powered answers with citations from your documents</p>
+    </div>
+    """, unsafe_allow_html=True)
 
 
 if __name__ == "__main__":
