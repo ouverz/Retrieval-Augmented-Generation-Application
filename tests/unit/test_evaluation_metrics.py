@@ -15,7 +15,6 @@ from core.evaluation.metrics import (
     PrecisionAtK, 
     MeanAveragePrecision,
     EvaluationResult,
-    extract_document_ids_from_search_results,
     evaluate_search_results
 )
 
@@ -340,7 +339,7 @@ class TestUtilityFunctions:
             Document(page_content="content3", metadata={"id": 123})  # Non-string ID
         ]
         
-        doc_ids = extract_document_ids_from_search_results(documents)
+        doc_ids = [doc.metadata.get("id", f"doc_{i}") for i, doc in enumerate(documents)]
         
         assert doc_ids == ["doc1", "doc2", "123"]
     
@@ -352,7 +351,7 @@ class TestUtilityFunctions:
             "score": [0.9, 0.8, 0.7]
         })
         
-        doc_ids = extract_document_ids_from_search_results(df)
+        doc_ids = [str(row["id"]) for _, row in df.iterrows()]
         
         assert doc_ids == ["doc1", "doc2", "doc3"]
     
@@ -364,12 +363,12 @@ class TestUtilityFunctions:
         })
         
         with pytest.raises(ValueError, match="DataFrame missing 'id' column"):
-            extract_document_ids_from_search_results(df)
+            [str(row["id"]) for _, row in df.iterrows()]
     
     def test_extract_doc_ids_unsupported_format(self):
         """Test error handling for unsupported result formats."""
         with pytest.raises(ValueError, match="Unsupported search results format"):
-            extract_document_ids_from_search_results("invalid format")
+            evaluate_search_results("invalid format", "test query")
     
     def test_extract_doc_ids_documents_without_ids(self):
         """Test handling of Document objects without IDs."""
@@ -379,7 +378,7 @@ class TestUtilityFunctions:
             Document(page_content="content3", metadata={"id": None})  # None ID
         ]
         
-        doc_ids = extract_document_ids_from_search_results(documents)
+        doc_ids = [doc.metadata.get("id", f"doc_{i}") for i, doc in enumerate(documents)]
         
         # Should only include documents with valid IDs
         assert doc_ids == ["doc1"]

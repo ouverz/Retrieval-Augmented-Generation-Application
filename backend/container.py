@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Optional
 from core.services.llm_service import LLMFactory
 from core.services.cache_service import CacheService, get_cache_service
+from core.services.evaluation_service import EvaluationService, create_evaluation_service
 from core.search.hybrid_search import HybridSearchEngine
 from core.search.bm25_search import BM25SearchEngine
 from core.search.vector_search import VectorSearchEngine
@@ -35,11 +36,14 @@ class AppContainer:
     hybrid_engine: Optional[HybridSearchEngine] = None
     llm_factory: Optional[LLMFactory] = None
     cache_service: Optional[CacheService] = None
+    evaluation_service: Optional[EvaluationService] = None
 
     def __post_init__(self):
-        """Initialize cache service on container creation."""
+        """Initialize cache and evaluation services on container creation."""
         if self.cache_service is None:
             self.cache_service = get_cache_service()
+        if self.evaluation_service is None:
+            self.evaluation_service = create_evaluation_service(self.cache_service)
 
     def is_ready(self) -> bool:
         return (
@@ -49,6 +53,7 @@ class AppContainer:
             and self.bm25_engine.retriever is not None
             and self.vector_engine is not None
             and self.cache_service is not None
+            and self.evaluation_service is not None
         )
     
     def get_cache_health(self) -> dict:
@@ -75,6 +80,7 @@ class ImmutableAppContainer:
     bm25_engine: BM25SearchEngine
     vector_engine: VectorSearchEngine
     hybrid_engine: HybridSearchEngine
+    evaluation_service: EvaluationService
     
     def is_ready(self) -> bool:
         """Check if all required services are properly initialized."""
@@ -85,6 +91,7 @@ class ImmutableAppContainer:
             and self.bm25_engine.retriever is not None
             and self.vector_engine is not None
             and self.cache_service is not None
+            and self.evaluation_service is not None
         )
     
     def get_cache_health(self) -> dict:
@@ -131,6 +138,7 @@ def create_immutable_container(data_dir: str, pg_dsn: str) -> ImmutableAppContai
         # Initialize core services
         cache_service = get_cache_service()
         llm_factory = LLMFactory()
+        evaluation_service = create_evaluation_service(cache_service)
         
         # Initialize search engines
         vector_engine = VectorSearchEngine()
@@ -158,6 +166,7 @@ def create_immutable_container(data_dir: str, pg_dsn: str) -> ImmutableAppContai
             bm25_engine=bm25_engine,
             vector_engine=vector_engine,
             hybrid_engine=hybrid_engine,
+            evaluation_service=evaluation_service,
         )
         
         logger.info(f"Immutable container created successfully, ready: {container.is_ready()}")

@@ -58,9 +58,9 @@ def get_init_status() -> Dict[str, Any]:
     return make_api_request("/init/status")
 
 
-def query_system(query: str, top_k: int = 8, rrf_k: int = None, session_id: str = None) -> Dict[str, Any]:
+def query_system(query: str, top_k: int = 8, rrf_k: int = None, session_id: str = None, enable_evaluation: bool = True) -> Dict[str, Any]:
     """Query the RAG system"""
-    payload = {"query": query, "top_k": top_k}
+    payload = {"query": query, "top_k": top_k, "enable_evaluation": enable_evaluation}
     if rrf_k is not None:
         payload["rrf_k"] = rrf_k
     if session_id is not None:
@@ -124,16 +124,22 @@ def display_evaluation_metrics(evaluation_metrics: Dict[str, Any], query_history
     # MRR Card
     if mrr:
         with cols[0]:
-            quality_color = get_quality_color(mrr.get("interpretation", "Fair"))
-            quality_emoji = get_quality_emoji(mrr.get("interpretation", "Fair"))
+            # Handle both enum and string interpretation values
+            interpretation = mrr.get("interpretation", "Fair")
+            if hasattr(interpretation, 'value'):
+                interpretation = interpretation.value
+            quality_color = get_quality_color(interpretation)
+            quality_emoji = get_quality_emoji(interpretation)
             value = mrr.get('value', 0)
             progress_width = int(value * 100)
+            description = mrr.get('description', 'Mean Reciprocal Rank')
             st.markdown(f"""
             <div class="metric-card">
                 <div class="metric-value" style="color: {quality_color};">
                     {quality_emoji} {value:.3f}
                 </div>
                 <div class="metric-label">Answer Ranking Quality</div>
+                <div class="metric-description">{description}</div>
                 <div class="metric-progress">
                     <div class="metric-progress-bar" style="width: {progress_width}%; background-color: {quality_color};"></div>
                 </div>
@@ -143,16 +149,22 @@ def display_evaluation_metrics(evaluation_metrics: Dict[str, Any], query_history
     # MAP Card
     if map_score:
         with cols[1]:
-            quality_color = get_quality_color(map_score.get("interpretation", "Fair"))
-            quality_emoji = get_quality_emoji(map_score.get("interpretation", "Fair"))
+            # Handle both enum and string interpretation values
+            interpretation = map_score.get("interpretation", "Fair")
+            if hasattr(interpretation, 'value'):
+                interpretation = interpretation.value
+            quality_color = get_quality_color(interpretation)
+            quality_emoji = get_quality_emoji(interpretation)
             value = map_score.get('value', 0)
             progress_width = int(value * 100)
+            description = map_score.get('description', 'Mean Average Precision')
             st.markdown(f"""
             <div class="metric-card">
                 <div class="metric-value" style="color: {quality_color};">
                     {quality_emoji} {value:.3f}
                 </div>
                 <div class="metric-label">Overall Search Quality</div>
+                <div class="metric-description">{description}</div>
                 <div class="metric-progress">
                     <div class="metric-progress-bar" style="width: {progress_width}%; background-color: {quality_color};"></div>
                 </div>
@@ -168,7 +180,11 @@ def display_evaluation_metrics(evaluation_metrics: Dict[str, Any], query_history
             display_precision = None
             
             for k in preferred_ks:
-                if str(k) in precision_at_k:
+                if k in precision_at_k:  # Check for integer keys first
+                    display_k = k
+                    display_precision = precision_at_k[k]
+                    break
+                elif str(k) in precision_at_k:  # Then check for string keys
                     display_k = k
                     display_precision = precision_at_k[str(k)]
                     break
@@ -176,20 +192,26 @@ def display_evaluation_metrics(evaluation_metrics: Dict[str, Any], query_history
             if not display_precision and precision_at_k:
                 # Use first available if preferred not found
                 first_k = list(precision_at_k.keys())[0]
-                display_k = int(first_k)
+                display_k = int(first_k) if isinstance(first_k, str) and first_k.isdigit() else first_k
                 display_precision = precision_at_k[first_k]
                 
             if display_precision:
-                quality_color = get_quality_color(display_precision.get("interpretation", "Fair"))
-                quality_emoji = get_quality_emoji(display_precision.get("interpretation", "Fair"))
+                # Handle both enum and string interpretation values
+                interpretation = display_precision.get("interpretation", "Fair")
+                if hasattr(interpretation, 'value'):
+                    interpretation = interpretation.value
+                quality_color = get_quality_color(interpretation)
+                quality_emoji = get_quality_emoji(interpretation)
                 value = display_precision.get('value', 0)
                 progress_width = int(value * 100)
+                description = display_precision.get('description', f'Precision at {display_k}')
                 st.markdown(f"""
                 <div class="metric-card">
                     <div class="metric-value" style="color: {quality_color};">
                         {quality_emoji} {value:.3f}
                     </div>
                     <div class="metric-label">Top {display_k} Results Accuracy</div>
+                    <div class="metric-description">{description}</div>
                     <div class="metric-progress">
                         <div class="metric-progress-bar" style="width: {progress_width}%; background-color: {quality_color};"></div>
                     </div>
@@ -410,6 +432,13 @@ def main():
             font-size: 0.9rem;
             text-transform: uppercase;
             letter-spacing: 1px;
+        }
+        
+        .metric-description {
+            color: #cbd5e0;
+            font-size: 0.8rem;
+            margin-top: 0.5rem;
+            font-style: italic;
         }
         
         /* Weight display styling */
@@ -698,7 +727,7 @@ def main():
             start_time = time.time()
 
             with st.spinner("Searching and synthesizing answer..."):
-                result = query_system(query, top_k=top_k, rrf_k=rrf_k, session_id=st.session_state.get('session_id'))
+                result = query_system(query, top_k=top_k, rrf_k=rrf_k, session_id=st.session_state.get('session_id'), enable_evaluation=show_evaluation)
 
             elapsed_time = time.time() - start_time
 
@@ -706,7 +735,7 @@ def main():
                 data = result["data"]
                 st.success("✅ Query completed successfully!")
 
-                # 6. Evaluation Metrics Display
+                # 6. Store metrics in session history
                 evaluation_metrics = data.get("evaluation_metrics")
                 if evaluation_metrics and show_evaluation:
                     # Store metrics in session history
@@ -726,8 +755,6 @@ def main():
                     # Keep only last 10 queries for performance
                     if len(st.session_state.query_history) > 10:
                         st.session_state.query_history = st.session_state.query_history[-10:]
-                    
-                    display_evaluation_metrics(evaluation_metrics, st.session_state.query_history)
 
                 # 7. Search Results Summary (moved from breakdown expander)
                 if data.get("results_table"):
@@ -815,104 +842,112 @@ def main():
                     </div>
                     """, unsafe_allow_html=True)
 
-                # 10. Additional details (keep as expandable sections)
-                with st.expander("🧠 Thought Process"):
-                    for i, thought in enumerate(data.get("thought_process", []), 1):
-                        st.write(f"{i}. {thought}")
+                # 10. Evaluation Metrics Display (after Query Performance)
+                evaluation_metrics = data.get("evaluation_metrics")
+                
+                if evaluation_metrics and show_evaluation:
+                    st.markdown("---")  # Separator
+                    display_evaluation_metrics(evaluation_metrics, st.session_state.get('query_history', []))
 
-                if data.get("citations"):
-                    with st.expander("📚 Citations"):
-                        for i, citation in enumerate(data["citations"], 1):
-                            # Try different fields for source identification
-                            source = (
-                                citation.get("source_url")
-                                or citation.get("source")
-                                or citation.get("doc_id")
-                                or f"Citation {i}"
+                # 11. Additional details (controlled by show_evaluation toggle)
+                if show_evaluation:
+                    with st.expander("🧠 Thought Process"):
+                        for i, thought in enumerate(data.get("thought_process", []), 1):
+                            st.write(f"{i}. {thought}")
+
+                    if data.get("citations"):
+                        with st.expander("📚 Citations"):
+                            for i, citation in enumerate(data["citations"], 1):
+                                # Try different fields for source identification
+                                source = (
+                                    citation.get("source_url")
+                                    or citation.get("source")
+                                    or citation.get("doc_id")
+                                    or f"Citation {i}"
+                                )
+
+                                score = citation.get("score", "N/A")
+                                chunk_id = citation.get("chunk_id", "")
+                                doc_id = citation.get("doc_id", "")
+
+                                # Create a detailed citation display
+                                citation_text = f"**{source}**"
+                                if chunk_id:
+                                    citation_text += f" (Chunk: {chunk_id})"
+                                if doc_id and doc_id != source:
+                                    citation_text += f" [Doc: {doc_id}]"
+                                citation_text += f" - Score: {score}"
+
+                                st.write(f"{i}. {citation_text}")
+
+                                # Debug info in expandable section
+                                if st.checkbox(
+                                    f"Debug info for citation {i}", key=f"debug_cite_{i}"
+                                ):
+                                    st.json(citation)
+
+                    # Search Results Breakdown (controlled by show_evaluation toggle)
+                    if data.get("results_table"):
+                        with st.expander("📊 Search Results Breakdown"):
+                            results_df = pd.DataFrame(data["results_table"])
+
+                            # Filter to only the requested columns
+                            filtered_columns = [
+                                "rank", "source_id", "content_preview", "engines", 
+                                "bm25_rank", "vector_rank", "vector_similarity", "distance"
+                            ]
+                            
+                            # Only include columns that exist in the dataframe
+                            available_columns = [col for col in filtered_columns if col in results_df.columns]
+                            filtered_df = results_df[available_columns]
+
+                            # Style the dataframe for better readability
+                            st.dataframe(
+                                filtered_df,
+                                column_config={
+                                    "rank": st.column_config.NumberColumn(
+                                        "Rank", width="small"
+                                    ),
+                                    "source_id": st.column_config.TextColumn(
+                                        "Source ID", width="medium"
+                                    ),
+                                    "content_preview": st.column_config.TextColumn(
+                                        "Content Preview", width="large"
+                                    ),
+                                    "engines": st.column_config.TextColumn(
+                                        "Found By", width="small"
+                                    ),
+                                    "bm25_rank": st.column_config.NumberColumn(
+                                        "BM25 Rank", width="small"
+                                    ),
+                                    "vector_rank": st.column_config.NumberColumn(
+                                        "Vector Rank", width="small"
+                                    ),
+                                    "vector_similarity": st.column_config.NumberColumn(
+                                        "Vector Similarity", format="%.4f", width="small"
+                                    ),
+                                    "distance": st.column_config.NumberColumn(
+                                        "Vector Distance", format="%.4f", width="small"
+                                    ),
+                                },
+                                hide_index=True,
+                                use_container_width=True,
                             )
 
-                            score = citation.get("score", "N/A")
-                            chunk_id = citation.get("chunk_id", "")
-                            doc_id = citation.get("doc_id", "")
-
-                            # Create a detailed citation display
-                            citation_text = f"**{source}**"
-                            if chunk_id:
-                                citation_text += f" (Chunk: {chunk_id})"
-                            if doc_id and doc_id != source:
-                                citation_text += f" [Doc: {doc_id}]"
-                            citation_text += f" - Score: {score}"
-
-                            st.write(f"{i}. {citation_text}")
-
-                            # Debug info in expandable section
-                            if st.checkbox(
-                                f"Debug info for citation {i}", key=f"debug_cite_{i}"
-                            ):
-                                st.json(citation)
-
-                # Search Results Breakdown (with filtered columns)
-                if data.get("results_table"):
-                    with st.expander("📊 Search Results Breakdown"):
-                        results_df = pd.DataFrame(data["results_table"])
-
-                        # Filter to only the requested columns
-                        filtered_columns = [
-                            "rank", "source_id", "content_preview", "engines", 
-                            "bm25_rank", "vector_rank", "vector_similarity", "distance"
-                        ]
-                        
-                        # Only include columns that exist in the dataframe
-                        available_columns = [col for col in filtered_columns if col in results_df.columns]
-                        filtered_df = results_df[available_columns]
-
-                        # Style the dataframe for better readability
-                        st.dataframe(
-                            filtered_df,
-                            column_config={
-                                "rank": st.column_config.NumberColumn(
-                                    "Rank", width="small"
+                    # Technical details (controlled by show_evaluation toggle)
+                    with st.expander("🔬 Technical Details"):
+                        st.json(
+                            {
+                                "precision": data.get("precision", 0),
+                                "evidence_precision": data.get(
+                                    "evidence_precision", "unknown"
                                 ),
-                                "source_id": st.column_config.TextColumn(
-                                    "Source ID", width="medium"
-                                ),
-                                "content_preview": st.column_config.TextColumn(
-                                    "Content Preview", width="large"
-                                ),
-                                "engines": st.column_config.TextColumn(
-                                    "Found By", width="small"
-                                ),
-                                "bm25_rank": st.column_config.NumberColumn(
-                                    "BM25 Rank", width="small"
-                                ),
-                                "vector_rank": st.column_config.NumberColumn(
-                                    "Vector Rank", width="small"
-                                ),
-                                "vector_similarity": st.column_config.NumberColumn(
-                                    "Vector Similarity", format="%.4f", width="small"
-                                ),
-                                "distance": st.column_config.NumberColumn(
-                                    "Vector Distance", format="%.4f", width="small"
-                                ),
-                            },
-                            hide_index=True,
-                            use_container_width=True,
+                                "query_settings": {
+                                    "top_k": top_k,
+                                    "rrf_k": rrf_k  # Using default value when UI config is disabled
+                                },
+                            }
                         )
-
-                # Technical details
-                with st.expander("🔬 Technical Details"):
-                    st.json(
-                        {
-                            "precision": data.get("precision", 0),
-                            "evidence_precision": data.get(
-                                "evidence_precision", "unknown"
-                            ),
-                            "query_settings": {
-                                "top_k": top_k,
-                                "rrf_k": rrf_k  # Using default value when UI config is disabled
-                            },
-                        }
-                    )
 
             else:
                 st.error(f"❌ Query failed: {result['error']}")
@@ -937,20 +972,21 @@ def main():
 
     # 12. Quick Start Guide (moved from sidebar to main content)
     st.markdown("### ℹ️ Quick Start Guide")
-    st.markdown("""
-    <div style="background-color: #2d3748; padding: 1.5rem; border-radius: 10px; border: 1px solid #4a5568; color: #a0aec0; line-height: 1.6;">
-        <p><strong style="color: #ffffff;">1. Start FastAPI Server:</strong><br>
-        <code style="background-color: #1a1d29; padding: 0.5rem; border-radius: 4px; display: block; margin: 0.5rem 0;">
+    
+    # Use info container for better formatting
+    with st.container():
+        st.info("""
+        **1. Start FastAPI Server:**
+        ```
         uvicorn backend.main:app --reload
-        </code></p>
+        ```
         
-        <p><strong style="color: #ffffff;">2. Initialize System:</strong><br>
-        Use the sidebar controls to process your documents</p>
+        **2. Initialize System:**
+        Use the sidebar controls to process your documents
         
-        <p><strong style="color: #ffffff;">3. Ask Questions:</strong><br>
-        Get AI-powered answers with citations from your documents</p>
-    </div>
-    """, unsafe_allow_html=True)
+        **3. Ask Questions:**
+        Get AI-powered answers with citations from your documents
+        """)
 
 
 if __name__ == "__main__":

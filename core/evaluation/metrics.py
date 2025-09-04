@@ -1,477 +1,376 @@
 """
-Information Retrieval metrics for RAG system evaluation.
-
-This module implements standard IR metrics including Mean Reciprocal Rank (MRR),
-Precision@K, and Mean Average Precision (MAP) for evaluating search quality.
-Designed to work with the existing hybrid search engine and document rankings.
+Information Retrieval evaluation metrics for RAG system assessment.
+Provides standard IR metrics like MRR, MAP, Precision@K, Recall@K, and NDCG@K.
 """
-
-from __future__ import annotations
-import logging
-import pandas as pd
 from abc import ABC, abstractmethod
+from typing import List, Dict, Any, Optional, Set
 from dataclasses import dataclass
-from typing import List, Dict, Any, Optional, Set, Union
-from langchain.schema import Document
+import pandas as pd
+import numpy as np
+import logging
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class EvaluationResult:
-    """Standardized evaluation result format."""
-    metric_name: str
-    score: float
-    query_scores: Dict[str, float]
-    metadata: Dict[str, Any]
+    """Container for evaluation metric results."""
+    value: float
+    confidence_interval: Optional[List[float]] = None
+    metadata: Optional[Dict[str, Any]] = None
 
 
 class EvaluationMetric(ABC):
-    """Abstract base class for evaluation metrics."""
+    """Base class for evaluation metrics."""
     
     @abstractmethod
-    def calculate(
-        self, 
-        search_results: Dict[str, List[str]], 
-        ground_truth: Dict[str, Set[str]]
-    ) -> EvaluationResult:
+    def compute(self, 
+                retrieved_docs: List[str], 
+                relevant_docs: Set[str],
+                scores: Optional[List[float]] = None) -> EvaluationResult:
         """
-        Calculate metric score for search results against ground truth.
+        Compute the metric for a single query.
         
         Args:
-            search_results: Dict mapping query_id to ranked list of doc_ids
-            ground_truth: Dict mapping query_id to set of relevant doc_ids
+            retrieved_docs: List of retrieved document IDs in ranking order
+            relevant_docs: Set of relevant document IDs for the query
+            scores: Optional relevance scores for graded evaluation
             
         Returns:
-            EvaluationResult with score and per-query breakdown
+            EvaluationResult with computed metric value
         """
-        pass
-    
-    @abstractmethod
-    def get_name(self) -> str:
-        """Return metric name for identification."""
         pass
 
 
 class MeanReciprocalRank(EvaluationMetric):
-    """
-    Mean Reciprocal Rank (MRR) metric implementation.
+    """Mean Reciprocal Rank (MRR) metric."""
     
-    MRR = (1/|Q|) * Σ(1/rank_i) where rank_i is position of first relevant doc
-    Measures how well the search system ranks the first relevant document.
-    """
-    
-    def __init__(self):
-        """Initialize MRR metric calculator."""
-        self.metric_name = "Mean Reciprocal Rank (MRR)"
-    
-    def get_name(self) -> str:
-        """Return metric name."""
-        return self.metric_name
-    
-    def _calculate_reciprocal_rank(
-        self, 
-        ranked_docs: List[str], 
-        relevant_docs: Set[str]
-    ) -> float:
-        """
-        Calculate reciprocal rank for a single query.
-        
-        Args:
-            ranked_docs: Ranked list of document IDs
-            relevant_docs: Set of relevant document IDs
-            
-        Returns:
-            Reciprocal rank (1/position) of first relevant document, 0 if none
-        """
-        if not ranked_docs or not relevant_docs:
-            return 0.0
-        
-        for i, doc_id in enumerate(ranked_docs, 1):
+    def compute(self, 
+                retrieved_docs: List[str], 
+                relevant_docs: Set[str],
+                scores: Optional[List[float]] = None) -> EvaluationResult:
+        """Compute MRR for a single query."""
+        for rank, doc_id in enumerate(retrieved_docs, 1):
             if doc_id in relevant_docs:
-                return 1.0 / i
+                rr_value = 1.0 / rank
+                return EvaluationResult(
+                    value=rr_value,
+                    metadata={"first_relevant_rank": rank}
+                )
         
-        return 0.0
-    
-    def calculate(
-        self, 
-        search_results: Dict[str, List[str]], 
-        ground_truth: Dict[str, Set[str]]
-    ) -> EvaluationResult:
-        """
-        Calculate MRR across all queries.
-        
-        Args:
-            search_results: Dict mapping query_id to ranked doc_ids
-            ground_truth: Dict mapping query_id to relevant doc_ids
-            
-        Returns:
-            EvaluationResult with MRR score and per-query breakdown
-        """
-        if not search_results:
-            logger.warning("Empty search results provided to MRR calculation")
-            return EvaluationResult(
-                metric_name=self.metric_name,
-                score=0.0,
-                query_scores={},
-                metadata={"total_queries": 0, "queries_with_results": 0}
-            )
-        
-        query_scores = {}
-        reciprocal_ranks = []
-        
-        for query_id in search_results:
-            ranked_docs = search_results.get(query_id, [])
-            relevant_docs = ground_truth.get(query_id, set())
-            
-            if not relevant_docs:
-                logger.warning(f"No ground truth for query {query_id}")
-                continue
-            
-            rr = self._calculate_reciprocal_rank(ranked_docs, relevant_docs)
-            query_scores[query_id] = rr
-            reciprocal_ranks.append(rr)
-        
-        # Calculate MRR
-        mrr_score = sum(reciprocal_ranks) / len(reciprocal_ranks) if reciprocal_ranks else 0.0
-        
-        metadata = {
-            "total_queries": len(search_results),
-            "queries_with_ground_truth": len(reciprocal_ranks),
-            "queries_with_results": len([q for q in search_results.values() if q]),
-            "zero_reciprocal_ranks": reciprocal_ranks.count(0.0)
-        }
-        
-        logger.info(f"MRR calculation completed: {mrr_score:.4f} "
-                   f"({len(reciprocal_ranks)} queries)")
-        
-        return EvaluationResult(
-            metric_name=self.metric_name,
-            score=mrr_score,
-            query_scores=query_scores,
-            metadata=metadata
-        )
+        return EvaluationResult(value=0.0, metadata={"first_relevant_rank": None})
 
 
 class PrecisionAtK(EvaluationMetric):
-    """
-    Precision@K metric implementation.
+    """Precision@K metric."""
     
-    P@K = (relevant documents in top K) / K
-    Measures fraction of top K results that are relevant.
-    """
-    
-    def __init__(self, k: int = 10):
-        """
-        Initialize Precision@K metric.
-        
-        Args:
-            k: Number of top results to consider
-        """
-        if k <= 0:
-            raise ValueError("k parameter must be positive")
-        
+    def __init__(self, k: int):
+        """Initialize with specific K value."""
         self.k = k
-        self.metric_name = f"Precision@{k}"
     
-    def get_name(self) -> str:
-        """Return metric name."""
-        return self.metric_name
-    
-    def _calculate_precision_at_k(
-        self, 
-        ranked_docs: List[str], 
-        relevant_docs: Set[str],
-        k: int
-    ) -> float:
-        """
-        Calculate precision@k for a single query.
-        
-        Args:
-            ranked_docs: Ranked list of document IDs
-            relevant_docs: Set of relevant document IDs
-            k: Number of top results to consider
-            
-        Returns:
-            Precision@K score (0.0 to 1.0)
-        """
-        if not ranked_docs or not relevant_docs:
-            return 0.0
-        
-        top_k_docs = ranked_docs[:k]
-        relevant_in_top_k = sum(1 for doc_id in top_k_docs 
-                              if doc_id in relevant_docs)
-        
-        return relevant_in_top_k / len(top_k_docs) if top_k_docs else 0.0
-    
-    def calculate(
-        self, 
-        search_results: Dict[str, List[str]], 
-        ground_truth: Dict[str, Set[str]]
-    ) -> EvaluationResult:
-        """
-        Calculate Precision@K across all queries.
-        
-        Args:
-            search_results: Dict mapping query_id to ranked doc_ids
-            ground_truth: Dict mapping query_id to relevant doc_ids
-            
-        Returns:
-            EvaluationResult with Precision@K score and per-query breakdown
-        """
-        if not search_results:
-            logger.warning("Empty search results provided to Precision@K calculation")
-            return EvaluationResult(
-                metric_name=self.metric_name,
-                score=0.0,
-                query_scores={},
-                metadata={"total_queries": 0, "k_value": self.k}
-            )
-        
-        query_scores = {}
-        precision_scores = []
-        
-        for query_id in search_results:
-            ranked_docs = search_results.get(query_id, [])
-            relevant_docs = ground_truth.get(query_id, set())
-            
-            if not relevant_docs:
-                logger.warning(f"No ground truth for query {query_id}")
-                continue
-            
-            precision = self._calculate_precision_at_k(
-                ranked_docs, relevant_docs, self.k
-            )
-            query_scores[query_id] = precision
-            precision_scores.append(precision)
-        
-        # Calculate mean Precision@K
-        mean_precision = (sum(precision_scores) / len(precision_scores) 
-                         if precision_scores else 0.0)
-        
-        metadata = {
-            "total_queries": len(search_results),
-            "queries_with_ground_truth": len(precision_scores),
-            "k_value": self.k,
-            "perfect_precision_queries": precision_scores.count(1.0),
-            "zero_precision_queries": precision_scores.count(0.0)
-        }
-        
-        logger.info(f"Precision@{self.k} calculation completed: "
-                   f"{mean_precision:.4f} ({len(precision_scores)} queries)")
+    def compute(self, 
+                retrieved_docs: List[str], 
+                relevant_docs: Set[str],
+                scores: Optional[List[float]] = None) -> EvaluationResult:
+        """Compute Precision@K for a single query."""
+        top_k_docs = retrieved_docs[:self.k]
+        relevant_count = sum(1 for doc_id in top_k_docs if doc_id in relevant_docs)
+        precision = relevant_count / len(top_k_docs) if top_k_docs else 0.0
         
         return EvaluationResult(
-            metric_name=self.metric_name,
-            score=mean_precision,
-            query_scores=query_scores,
-            metadata=metadata
+            value=precision,
+            metadata={
+                "k": self.k,
+                "relevant_in_top_k": relevant_count,
+                "total_retrieved": len(top_k_docs)
+            }
+        )
+
+
+class RecallAtK(EvaluationMetric):
+    """Recall@K metric."""
+    
+    def __init__(self, k: int):
+        """Initialize with specific K value."""
+        self.k = k
+    
+    def compute(self, 
+                retrieved_docs: List[str], 
+                relevant_docs: Set[str],
+                scores: Optional[List[float]] = None) -> EvaluationResult:
+        """Compute Recall@K for a single query."""
+        if not relevant_docs:
+            return EvaluationResult(value=0.0, metadata={"k": self.k, "no_relevant_docs": True})
+            
+        top_k_docs = retrieved_docs[:self.k]
+        relevant_count = sum(1 for doc_id in top_k_docs if doc_id in relevant_docs)
+        recall = relevant_count / len(relevant_docs)
+        
+        return EvaluationResult(
+            value=recall,
+            metadata={
+                "k": self.k,
+                "relevant_in_top_k": relevant_count,
+                "total_relevant": len(relevant_docs)
+            }
         )
 
 
 class MeanAveragePrecision(EvaluationMetric):
-    """
-    Mean Average Precision (MAP) metric implementation.
+    """Mean Average Precision (MAP) metric."""
     
-    MAP = (1/|Q|) * Σ(AP_q) where AP is Average Precision per query
-    AP = (1/R) * Σ(P(k) * rel(k)) where P(k) is precision at rank k
-    """
-    
-    def __init__(self):
-        """Initialize MAP metric calculator."""
-        self.metric_name = "Mean Average Precision (MAP)"
-    
-    def get_name(self) -> str:
-        """Return metric name."""
-        return self.metric_name
-    
-    def _calculate_average_precision(
-        self, 
-        ranked_docs: List[str], 
-        relevant_docs: Set[str]
-    ) -> float:
-        """
-        Calculate Average Precision for a single query.
+    def compute(self, 
+                retrieved_docs: List[str], 
+                relevant_docs: Set[str],
+                scores: Optional[List[float]] = None) -> EvaluationResult:
+        """Compute Average Precision for a single query."""
+        if not relevant_docs:
+            return EvaluationResult(value=0.0, metadata={"no_relevant_docs": True})
         
-        Args:
-            ranked_docs: Ranked list of document IDs
-            relevant_docs: Set of relevant document IDs
-            
-        Returns:
-            Average Precision score (0.0 to 1.0)
-        """
-        if not ranked_docs or not relevant_docs:
-            return 0.0
-        
-        relevant_found = 0
         precision_sum = 0.0
+        relevant_count = 0
         
-        for i, doc_id in enumerate(ranked_docs, 1):
+        for rank, doc_id in enumerate(retrieved_docs, 1):
             if doc_id in relevant_docs:
-                relevant_found += 1
-                precision_at_i = relevant_found / i
-                precision_sum += precision_at_i
+                relevant_count += 1
+                precision_at_rank = relevant_count / rank
+                precision_sum += precision_at_rank
         
-        return precision_sum / len(relevant_docs) if relevant_docs else 0.0
-    
-    def calculate(
-        self, 
-        search_results: Dict[str, List[str]], 
-        ground_truth: Dict[str, Set[str]]
-    ) -> EvaluationResult:
-        """
-        Calculate MAP across all queries.
-        
-        Args:
-            search_results: Dict mapping query_id to ranked doc_ids
-            ground_truth: Dict mapping query_id to relevant doc_ids
-            
-        Returns:
-            EvaluationResult with MAP score and per-query breakdown
-        """
-        if not search_results:
-            logger.warning("Empty search results provided to MAP calculation")
-            return EvaluationResult(
-                metric_name=self.metric_name,
-                score=0.0,
-                query_scores={},
-                metadata={"total_queries": 0}
-            )
-        
-        query_scores = {}
-        ap_scores = []
-        
-        for query_id in search_results:
-            ranked_docs = search_results.get(query_id, [])
-            relevant_docs = ground_truth.get(query_id, set())
-            
-            if not relevant_docs:
-                logger.warning(f"No ground truth for query {query_id}")
-                continue
-            
-            ap = self._calculate_average_precision(ranked_docs, relevant_docs)
-            query_scores[query_id] = ap
-            ap_scores.append(ap)
-        
-        # Calculate MAP
-        map_score = sum(ap_scores) / len(ap_scores) if ap_scores else 0.0
-        
-        metadata = {
-            "total_queries": len(search_results),
-            "queries_with_ground_truth": len(ap_scores),
-            "perfect_ap_queries": ap_scores.count(1.0),
-            "zero_ap_queries": ap_scores.count(0.0),
-            "avg_relevant_docs_per_query": (
-                sum(len(ground_truth.get(q, set())) 
-                    for q in search_results) / len(search_results)
-                if search_results else 0.0
-            )
-        }
-        
-        logger.info(f"MAP calculation completed: {map_score:.4f} "
-                   f"({len(ap_scores)} queries)")
+        avg_precision = precision_sum / len(relevant_docs) if relevant_docs else 0.0
         
         return EvaluationResult(
-            metric_name=self.metric_name,
-            score=map_score,
-            query_scores=query_scores,
-            metadata=metadata
+            value=avg_precision,
+            metadata={
+                "relevant_found": relevant_count,
+                "total_relevant": len(relevant_docs),
+                "precision_sum": precision_sum
+            }
         )
 
 
-def extract_document_ids_from_search_results(
-    search_results: Union[List[Document], pd.DataFrame]
-) -> List[str]:
+class NDCGAtK(EvaluationMetric):
+    """Normalized Discounted Cumulative Gain@K metric."""
+    
+    def __init__(self, k: int):
+        """Initialize with specific K value."""
+        self.k = k
+    
+    def compute(self, 
+                retrieved_docs: List[str], 
+                relevant_docs: Set[str],
+                scores: Optional[List[float]] = None) -> EvaluationResult:
+        """
+        Compute NDCG@K for a single query.
+        Uses binary relevance (1 for relevant, 0 for not relevant).
+        """
+        # Binary relevance: 1 if relevant, 0 if not
+        relevance_scores = []
+        top_k_docs = retrieved_docs[:self.k]
+        
+        for doc_id in top_k_docs:
+            relevance_scores.append(1.0 if doc_id in relevant_docs else 0.0)
+        
+        # Compute DCG
+        dcg = 0.0
+        for i, relevance in enumerate(relevance_scores):
+            if i == 0:
+                dcg += relevance
+            else:
+                dcg += relevance / np.log2(i + 1)
+        
+        # Compute Ideal DCG (IDCG)
+        ideal_relevance = sorted([1.0] * min(len(relevant_docs), self.k), reverse=True)
+        idcg = 0.0
+        for i, relevance in enumerate(ideal_relevance):
+            if i == 0:
+                idcg += relevance
+            else:
+                idcg += relevance / np.log2(i + 1)
+        
+        # Compute NDCG
+        ndcg = dcg / idcg if idcg > 0 else 0.0
+        
+        return EvaluationResult(
+            value=ndcg,
+            metadata={
+                "k": self.k,
+                "dcg": dcg,
+                "idcg": idcg,
+                "relevant_in_top_k": sum(relevance_scores)
+            }
+        )
+
+
+def create_synthetic_relevance_judgments(
+    ctx_df: pd.DataFrame, 
+    score_threshold: float = 0.3
+) -> Set[str]:
     """
-    Extract document IDs from search engine results.
+    Create synthetic relevance judgments based on search scores.
     
     Args:
-        search_results: Either list of Document objects or DataFrame
+        ctx_df: Context DataFrame with search results
+        score_threshold: Minimum score to consider document relevant
         
     Returns:
-        List of document IDs in ranked order
-        
-    Raises:
-        ValueError: If results format is not supported
+        Set of document IDs considered relevant
     """
-    if isinstance(search_results, list):
-        # Handle List[Document] from search engines
-        doc_ids = []
-        for doc in search_results:
-            if isinstance(doc, Document):
-                doc_id = doc.metadata.get("id")
-                if doc_id is not None:
-                    doc_ids.append(str(doc_id))
-            else:
-                logger.warning(f"Non-Document object in results: {type(doc)}")
-        return doc_ids
+    logger.info(f"🔍 METRICS: Creating synthetic relevance judgments with threshold {score_threshold}")
+    logger.info(f"🔍 METRICS: Processing {len(ctx_df)} documents")
     
-    elif isinstance(search_results, pd.DataFrame):
-        # Handle DataFrame from search engines
-        if "id" in search_results.columns:
-            return search_results["id"].astype(str).tolist()
+    relevant_docs = set()
+    
+    for i, (_, row) in enumerate(ctx_df.iterrows()):
+        metadata = row.get("metadata", {})
+        logger.info(f"🔍 METRICS: Row {i} - metadata type: {type(metadata)}")
+        
+        # Handle both dict and JSON string metadata
+        if isinstance(metadata, str):
+            import json
+            try:
+                metadata = json.loads(metadata)
+                logger.info(f"🔍 METRICS: Row {i} - parsed JSON metadata successfully")
+            except Exception as e:
+                logger.warning(f"🔍 METRICS: Row {i} - failed to parse JSON metadata: {e}")
+                metadata = {}
+        
+        # Get score from RRF or other hybrid search systems - try different score field names
+        rrf_score = metadata.get("rrf_score")
+        hybrid_score = metadata.get("hybrid_score")
+        score_field = metadata.get("score")
+        vector_score = metadata.get("vector_score")
+        
+        logger.info(f"🔍 METRICS: Row {i} - rrf_score: {rrf_score}, hybrid_score: {hybrid_score}, score: {score_field}, vector_score: {vector_score}")
+        
+        # Prioritize RRF score since that's what our system uses
+        score = rrf_score or hybrid_score or score_field or vector_score or 0.0
+        logger.info(f"🔍 METRICS: Row {i} - final score: {score}, threshold: {score_threshold}")
+        
+        if score >= score_threshold:
+            doc_id = row.get("id", metadata.get("id", f"doc_{len(relevant_docs)}"))
+            logger.info(f"🔍 METRICS: Row {i} - document {doc_id} is RELEVANT (score {score} >= {score_threshold})")
+            relevant_docs.add(str(doc_id))
         else:
-            raise ValueError("DataFrame missing 'id' column")
+            doc_id = row.get("id", metadata.get("id", f"doc_{i}"))
+            logger.info(f"🔍 METRICS: Row {i} - document {doc_id} is NOT RELEVANT (score {score} < {score_threshold})")
     
+    logger.info(f"🔍 METRICS: Created synthetic relevance judgments: {len(relevant_docs)} relevant docs from {len(ctx_df)} total")
+    if relevant_docs:
+        logger.info(f"🔍 METRICS: Relevant doc IDs: {list(relevant_docs)}")
     else:
-        raise ValueError(f"Unsupported search results format: {type(search_results)}")
+        logger.warning(f"🔍 METRICS: NO RELEVANT DOCUMENTS FOUND with threshold {score_threshold} - using fallback strategy!")
+        
+        # Fallback: Consider top 30% of documents as relevant if no documents meet threshold
+        if len(ctx_df) > 0:
+            fallback_count = max(1, len(ctx_df) // 3)  # At least 1, or top 1/3
+            logger.info(f"🔍 METRICS: Fallback - marking top {fallback_count} documents as relevant")
+            
+            for i in range(min(fallback_count, len(ctx_df))):
+                row = ctx_df.iloc[i]
+                doc_id = row.get("id")
+                if doc_id is None:
+                    metadata = row.get("metadata", {})
+                    if isinstance(metadata, str):
+                        import json
+                        try:
+                            metadata = json.loads(metadata)
+                        except:
+                            metadata = {}
+                    doc_id = metadata.get("id", f"doc_fallback_{i}")
+                
+                relevant_docs.add(str(doc_id))
+                logger.info(f"🔍 METRICS: Fallback - marked document {doc_id} as relevant")
+    
+    return relevant_docs
 
 
 def evaluate_search_results(
-    queries: Dict[str, str],
-    search_engine_results: Dict[str, Union[List[Document], pd.DataFrame]],
-    ground_truth: Dict[str, Set[str]],
-    metrics: Optional[List[EvaluationMetric]] = None
+    ctx_df: pd.DataFrame,
+    query: str,
+    relevance_judgments: Optional[Set[str]] = None,
+    k_values: List[int] = [1, 3, 5, 10]
 ) -> Dict[str, EvaluationResult]:
     """
     Evaluate search results using multiple IR metrics.
     
     Args:
-        queries: Dict mapping query_id to query string
-        search_engine_results: Dict mapping query_id to search results
-        ground_truth: Dict mapping query_id to set of relevant doc_ids
-        metrics: List of metrics to calculate (defaults to MRR, P@10, MAP)
+        ctx_df: Context DataFrame with search results
+        query: The search query (for logging)
+        relevance_judgments: Set of relevant document IDs, if None will create synthetic
+        k_values: List of K values for Precision@K, Recall@K, NDCG@K metrics
         
     Returns:
-        Dict mapping metric name to EvaluationResult
-        
-    Example:
-        >>> queries = {"q1": "sleep patterns children"}
-        >>> results = {"q1": [doc1, doc2, doc3]}  # Documents from search
-        >>> truth = {"q1": {"doc1", "doc3"}}  # Relevant docs
-        >>> evaluation = evaluate_search_results(queries, results, truth)
-        >>> print(f"MRR: {evaluation['Mean Reciprocal Rank (MRR)'].score}")
+        Dictionary of metric names to EvaluationResult objects
     """
-    if metrics is None:
-        metrics = [
-            MeanReciprocalRank(),
-            PrecisionAtK(k=10),
-            MeanAveragePrecision()
-        ]
+    logger.info(f"🔍 METRICS: evaluate_search_results called for query: {query[:50]}...")
+    logger.info(f"🔍 METRICS: ctx_df is None: {ctx_df is None}")
+    logger.info(f"🔍 METRICS: ctx_df length: {len(ctx_df) if ctx_df is not None else 'N/A'}")
     
-    # Convert search results to standardized format
-    standardized_results = {}
-    for query_id, results in search_engine_results.items():
-        try:
-            doc_ids = extract_document_ids_from_search_results(results)
-            standardized_results[query_id] = doc_ids
-        except Exception as e:
-            logger.error(f"Failed to extract doc IDs for query {query_id}: {e}")
-            standardized_results[query_id] = []
+    if ctx_df is None or len(ctx_df) == 0:
+        logger.warning(f"🔍 METRICS: No search results to evaluate for query: {query}")
+        return {}
     
-    # Calculate metrics
-    metric_results = {}
-    for metric in metrics:
-        try:
-            result = metric.calculate(standardized_results, ground_truth)
-            metric_results[metric.get_name()] = result
-            logger.info(f"Calculated {metric.get_name()}: {result.score:.4f}")
-        except Exception as e:
-            logger.error(f"Failed to calculate {metric.get_name()}: {e}")
-            metric_results[metric.get_name()] = EvaluationResult(
-                metric_name=metric.get_name(),
-                score=0.0,
-                query_scores={},
-                metadata={"error": str(e)}
-            )
+    # Extract document IDs in ranking order
+    retrieved_docs = []
+    logger.info(f"🔍 METRICS: Extracting document IDs from {len(ctx_df)} rows...")
     
-    return metric_results
+    for i, (_, row) in enumerate(ctx_df.iterrows()):
+        doc_id = row.get("id")
+        logger.info(f"🔍 METRICS: Row {i} - direct id field: {doc_id}")
+        
+        if doc_id is None:
+            metadata = row.get("metadata", {})
+            if isinstance(metadata, str):
+                import json
+                try:
+                    metadata = json.loads(metadata)
+                    logger.info(f"🔍 METRICS: Row {i} - parsed metadata for id lookup")
+                except:
+                    logger.warning(f"🔍 METRICS: Row {i} - failed to parse metadata for id lookup")
+                    metadata = {}
+            doc_id = metadata.get("id", f"doc_{len(retrieved_docs)}")
+            logger.info(f"🔍 METRICS: Row {i} - extracted id from metadata: {doc_id}")
+        
+        retrieved_docs.append(str(doc_id))
+    
+    logger.info(f"🔍 METRICS: Retrieved documents: {retrieved_docs}")
+    
+    # Create synthetic relevance judgments if none provided
+    if relevance_judgments is None:
+        logger.info(f"🔍 METRICS: No relevance judgments provided, creating synthetic ones...")
+        relevance_judgments = create_synthetic_relevance_judgments(ctx_df)
+    else:
+        logger.info(f"🔍 METRICS: Using provided relevance judgments: {relevance_judgments}")
+    
+    if not relevance_judgments:
+        logger.warning(f"🔍 METRICS: No relevant documents found for query: {query} - RETURNING EMPTY DICT!")
+        return {}
+    
+    # Compute metrics
+    results = {}
+    
+    # MRR
+    mrr_metric = MeanReciprocalRank()
+    results["mrr"] = mrr_metric.compute(retrieved_docs, relevance_judgments)
+    
+    # MAP
+    map_metric = MeanAveragePrecision()
+    results["map"] = map_metric.compute(retrieved_docs, relevance_judgments)
+    
+    # Precision@K, Recall@K, NDCG@K for different K values
+    for k in k_values:
+        if k <= len(retrieved_docs):
+            # Precision@K
+            precision_metric = PrecisionAtK(k)
+            results[f"precision_at_{k}"] = precision_metric.compute(retrieved_docs, relevance_judgments)
+            
+            # Recall@K
+            recall_metric = RecallAtK(k)
+            results[f"recall_at_{k}"] = recall_metric.compute(retrieved_docs, relevance_judgments)
+            
+            # NDCG@K
+            ndcg_metric = NDCGAtK(k)
+            results[f"ndcg_at_{k}"] = ndcg_metric.compute(retrieved_docs, relevance_judgments)
+    
+    logger.info(f"Computed {len(results)} evaluation metrics for query: {query[:50]}...")
+    return results

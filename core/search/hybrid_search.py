@@ -106,15 +106,18 @@ class HybridSearchEngine:
             
         return rrf_score
 
-    def _create_rrf_hybrid_scores(self, bm25_docs: List[Document], vec_df: pd.DataFrame, query: str) -> List[Document]:
+    def _create_rrf_hybrid_scores(self, bm25_docs: List[Document], vec_df: pd.DataFrame, query: str, rrf_k: int = None) -> List[Document]:
         """Create hybrid scores using Reciprocal Rank Fusion (RRF) algorithm with comprehensive logging."""
         rrf_start_time = time.time()
+        
+        # Use provided rrf_k or fall back to config
+        effective_rrf_k = rrf_k if rrf_k is not None else self.config.rrf_k
         
         # Log RRF fusion initiation with structured data
         logger.debug("Starting RRF fusion", extra={
             "bm25_docs_count": len(bm25_docs),
             "vector_docs_count": len(vec_df),
-            "rrf_k_value": self.config.rrf_k,
+            "rrf_k_value": effective_rrf_k,
             "query_preview": query[:50] + "..." if len(query) > 50 else query
         })
         
@@ -198,7 +201,7 @@ class HybridSearchEngine:
                     )
             
             # Calculate RRF score with detailed component tracking
-            rrf_score = self._calculate_rrf_score(bm25_rank, vector_rank)
+            rrf_score = self._calculate_rrf_score(bm25_rank, vector_rank, k=effective_rrf_k)
             
             # Apply quality penalty to final score
             final_score = rrf_score * quality_penalty
@@ -212,7 +215,7 @@ class HybridSearchEngine:
                     "vector_rank": vector_rank,
                     "quality_penalty": round(quality_penalty, 3),
                     "found_by_engines": found_by,
-                    "rrf_k_value": self.config.rrf_k,
+                    "rrf_k_value": effective_rrf_k,
                     "content_preview": (base_doc.page_content or "")[:100] + "..." if base_doc.page_content else "[No content]"
                 })
             
@@ -226,7 +229,7 @@ class HybridSearchEngine:
                 "vector_distance": vector_distance,
                 "content_quality_penalty": quality_penalty,
                 "found_by_engines": found_by,  # List of engines that found this document
-                "rrf_k_value": self.config.rrf_k,  # K parameter used for scoring
+                "rrf_k_value": effective_rrf_k,  # K parameter used for scoring
                 "source_engine": "rrf_hybrid",  # Mark as RRF hybrid result
                 "fusion_method": "reciprocal_rank_fusion"
             })
@@ -254,7 +257,7 @@ class HybridSearchEngine:
             "agreement_percentage": round((both_engines / len(hybrid_results) * 100), 2) if hybrid_results else 0,
             "avg_rrf_score": round(avg_rrf_score, 6),
             "top_rrf_score": round(top_rrf_score, 6),
-            "rrf_k_used": self.config.rrf_k
+            "rrf_k_used": effective_rrf_k
         })
         
         return hybrid_results
@@ -304,14 +307,24 @@ class HybridSearchEngine:
             )
         return pd.DataFrame(rows)
 
-    async def search(self, query: str, top_k: int = None, remove_duplicates: bool = True, vector_weight: float = None):
+    async def search(self, query: str, top_k: int = None, remove_duplicates: bool = True, vector_weight: float = None, rrf_k: int = None):
         """Search using Reciprocal Rank Fusion (RRF) to combine BM25 and vector results.
+        
+        Args:
+            query: Search query string
+            top_k: Maximum number of results to return
+            remove_duplicates: Whether to deduplicate results
+            vector_weight: Maintained for API compatibility but not used in RRF
+            rrf_k: RRF k parameter override (uses config.rrf_k if None)
         
         Note: vector_weight parameter is maintained for API compatibility but not used in RRF.
         RRF uses rank positions instead of weighted scores.
         """
         # Use top_k if provided, otherwise fall back to config max_results
         final_limit = top_k if top_k is not None else self.config.max_results
+        
+        # Use provided rrf_k or fall back to config
+        effective_rrf_k = rrf_k if rrf_k is not None else self.config.rrf_k
         
         # For RRF, we use the config directly (no weight calculations needed)
         cache_config = self.config
@@ -322,7 +335,7 @@ class HybridSearchEngine:
             ctx_df, response = cached_result
             logger.info("Cache hit for RRF hybrid search", extra={
                 "query_preview": query[:50] + "..." if len(query) > 50 else query,
-                "rrf_k_value": self.config.rrf_k,
+                "rrf_k_value": effective_rrf_k,
                 "cached_results_count": len(ctx_df) if ctx_df is not None else 0,
                 "fusion_method": "reciprocal_rank_fusion"
             })
@@ -333,7 +346,7 @@ class HybridSearchEngine:
             "query_length": len(query),
             "query_preview": query[:100] + "..." if len(query) > 100 else query,
             "final_limit": final_limit,
-            "rrf_k_value": self.config.rrf_k,
+            "rrf_k_value": effective_rrf_k,
             "bm25_top_k": self.config.bm25_top_k,
             "vector_top_k": self.config.vector_top_k,
             "deduplication_enabled": remove_duplicates,
@@ -347,7 +360,7 @@ class HybridSearchEngine:
         )
         
         # Create RRF hybrid scoring 
-        hybrid_results = self._create_rrf_hybrid_scores(bm25_docs, vec_df, query)
+        hybrid_results = self._create_rrf_hybrid_scores(bm25_docs, vec_df, query, rrf_k=effective_rrf_k)
         
         # Apply deduplication if requested
         if remove_duplicates:
@@ -381,7 +394,7 @@ class HybridSearchEngine:
             "engine_agreement_rate": round((both_count / len(top) * 100), 2) if top else 0,
             "avg_rrf_score": round(avg_rrf_score, 6),
             "top_rrf_score": round(top_rrf_score, 6),
-            "rrf_k_value": self.config.rrf_k,
+            "rrf_k_value": effective_rrf_k,
             "fusion_method": "reciprocal_rank_fusion",
             "deduplication_applied": remove_duplicates
         })
@@ -389,7 +402,7 @@ class HybridSearchEngine:
         # Legacy log messages for compatibility
         logger.info(f"RRF Hybrid Search: {len(bm25_docs)} BM25 + {len(vec_df)} Vector → {len(hybrid_results)} unique → {len(top)} final")
         logger.info(f"Final results: {bm25_count} found by BM25, {vector_count} found by Vector, {both_count} found by both")
-        logger.info(f"RRF parameters: k={self.config.rrf_k}")
+        logger.info(f"RRF parameters: k={effective_rrf_k}")
 
         # Generate response
         try:

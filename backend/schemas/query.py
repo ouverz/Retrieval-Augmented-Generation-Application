@@ -2,6 +2,7 @@
 from typing import Optional, Dict, List, Any
 from pydantic import BaseModel, Field
 from .common import SynthesizedResponse
+from .evaluation import EvaluationMetrics
 
 
 class QueryRequest(BaseModel):
@@ -15,6 +16,10 @@ class QueryRequest(BaseModel):
         le=1000, 
         description="RRF k parameter for rank fusion (1-1000). Higher values make fusion more conservative"
     )
+    enable_evaluation: bool = Field(
+        default=False, 
+        description="Enable evaluation metrics computation (may impact performance)"
+    )
 
 
 class QueryResponse(SynthesizedResponse):
@@ -26,3 +31,7 @@ class QueryResponse(SynthesizedResponse):
     cache_hit: bool = Field(default=False, description="Whether response came from cache")
     cache_key: Optional[str] = Field(default=None, description="Cache key used (for debugging)")
     session_id: Optional[str] = Field(default=None, description="Session ID if provided")
+    evaluation_metrics: Optional[EvaluationMetrics] = Field(
+        default=None, 
+        description="Evaluation metrics for search quality assessment"
+    )
