@@ -58,9 +58,9 @@ def get_init_status() -> Dict[str, Any]:
     return make_api_request("/init/status")
 
 
-def query_system(query: str, top_k: int = 8, rrf_k: int = None, session_id: str = None, enable_evaluation: bool = False) -> Dict[str, Any]:
+def query_system(query: str, top_k: int = 8, rrf_k: int = None, session_id: str = None) -> Dict[str, Any]:
     """Query the RAG system"""
-    payload = {"query": query, "top_k": top_k, "enable_evaluation": enable_evaluation}
+    payload = {"query": query, "top_k": top_k, "enable_evaluation": False}  # Disabled in lean branch
     if rrf_k is not None:
         payload["rrf_k"] = rrf_k
     if session_id is not None:
@@ -261,19 +261,7 @@ def main():
             background-color: transparent;
         }
         
-        /* Evaluation metrics specific styling */
-        .evaluation-header {
-            color: #ffffff;
-            font-size: 1.5rem;
-            font-weight: 600;
-            margin-bottom: 1rem;
-            text-align: center;
-        }
-        
-        .quality-excellent { color: #22c55e !important; }
-        .quality-good { color: #3b82f6 !important; }
-        .quality-fair { color: #f59e0b !important; }
-        .quality-poor { color: #ef4444 !important; }
+        /* REMOVED: Evaluation metrics specific styling - evaluation system removed in lean branch */
         
         /* Mobile responsive adjustments */
         @media (max-width: 768px) {
@@ -487,7 +475,7 @@ def main():
             start_time = time.time()
 
             with st.spinner("Searching and synthesizing answer..."):
-                result = query_system(query, top_k=top_k, rrf_k=rrf_k, session_id=st.session_state.get('session_id'), enable_evaluation=False)
+                result = query_system(query, top_k=top_k, rrf_k=rrf_k, session_id=st.session_state.get('session_id'))
 
             elapsed_time = time.time() - start_time
 

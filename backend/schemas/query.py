@@ -31,7 +31,4 @@ class QueryResponse(SynthesizedResponse):
     cache_hit: bool = Field(default=False, description="Whether response came from cache")
     cache_key: Optional[str] = Field(default=None, description="Cache key used (for debugging)")
     session_id: Optional[str] = Field(default=None, description="Session ID if provided")
-    evaluation_metrics: Optional[EvaluationMetrics] = Field(
-        default=None, 
-        description="Evaluation metrics for search quality assessment"
-    )
+    # REMOVED: evaluation_metrics field - evaluation system removed in lean branch

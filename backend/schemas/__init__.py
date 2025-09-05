@@ -2,13 +2,7 @@
 from .query import QueryRequest, QueryResponse
 from .ingest import InitRequest, InitResponse, InitStatusResponse, IngestResponse
 from .common import Citation, SynthesizedResponse
-from .evaluation import (
-    MetricQuality,
-    MetricResult,
-    EvaluationMetrics,
-    EvaluationMetadata,
-    EvaluationSummary
-)
+# REMOVED: evaluation imports - evaluation system removed in lean branch
 
 __all__ = [
     # Query schemas
@@ -22,10 +16,5 @@ __all__ = [
     # Common schemas
     "Citation",
     "SynthesizedResponse",
-    # Evaluation schemas
-    "MetricQuality",
-    "MetricResult",
-    "EvaluationMetrics",
-    "EvaluationMetadata",
-    "EvaluationSummary",
+    # REMOVED: evaluation schema exports - evaluation system removed in lean branch
 ]
