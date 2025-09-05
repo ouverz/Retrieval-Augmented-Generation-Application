@@ -87,7 +87,9 @@ def extract_metadata_with_pypdf(file_path):
             return doc_metadata
 
     except Exception as e:
-        print(f"Error extracting metadata with pypdf: {e}")
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error extracting metadata with pypdf: {e}")
         return {
             "title": Path(file_path),
             "authors": None,

@@ -1,9 +1,12 @@
 from __future__ import annotations
 from typing import List
+import logging
 from langchain_community.retrievers import BM25Retriever
 from langchain.schema import Document
 import re
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 def simple_tokenize(text: str) -> List[str]:
     """Simple tokenization that doesn't require NLTK data downloads."""
@@ -40,12 +43,12 @@ try:
     
     # Get the best available NLTK tokenizer
     tokenizer_func, tokenizer_name = get_nltk_tokenizer()
-    print(f"✅ Using NLTK {tokenizer_name} for BM25")
+    logger.info(f"Using NLTK {tokenizer_name} for BM25")
     
 except (ImportError, Exception) as e:
     # Use simple tokenizer as fallback
     tokenizer_func = simple_tokenize
-    print(f"⚠️  Using simple tokenizer for BM25 (NLTK error: {type(e).__name__})")
+    logger.warning(f"Using simple tokenizer for BM25 (NLTK error: {type(e).__name__})")
 
 
 class BM25SearchEngine:
