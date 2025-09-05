@@ -2,7 +2,7 @@
 from typing import Optional, Dict, List, Any
 from pydantic import BaseModel, Field
 from .common import SynthesizedResponse
-from .evaluation import EvaluationMetrics
+# REMOVED: EvaluationMetrics import - evaluation system removed in lean branch
 
 
 class QueryRequest(BaseModel):
@@ -18,7 +18,7 @@ class QueryRequest(BaseModel):
     )
     enable_evaluation: bool = Field(
         default=False, 
-        description="Enable evaluation metrics computation (may impact performance)"
+        description="DISABLED: Evaluation system removed in lean branch"
     )
 
 

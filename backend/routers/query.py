@@ -151,44 +151,8 @@ async def query_endpoint(req: QueryRequest, container: AppContainer = Depends(ap
             })
         
         # Compute evaluation metrics if requested
+        # REMOVED: Evaluation metrics computation - evaluation system removed in lean branch
         evaluation_metrics = None
-        logger.info(f"🔍 DEBUG: req.enable_evaluation = {req.enable_evaluation}")
-        logger.info(f"🔍 DEBUG: container.evaluation_service exists = {container.evaluation_service is not None}")
-        logger.info(f"🔍 DEBUG: ctx_df shape = {ctx_df.shape if ctx_df is not None else 'None'}")
-        
-        if req.enable_evaluation and container.evaluation_service:
-            try:
-                logger.info(f"🔍 Computing evaluation metrics for query: {req.query[:50]}...")
-                logger.info(f"🔍 DEBUG: ctx_df columns = {list(ctx_df.columns) if ctx_df is not None else 'None'}")
-                logger.info(f"🔍 DEBUG: ctx_df first few rows:")
-                if ctx_df is not None and len(ctx_df) > 0:
-                    for i in range(min(3, len(ctx_df))):
-                        row = ctx_df.iloc[i]
-                        logger.info(f"🔍   Row {i}: id={row.get('id', 'NO_ID')}, content_preview={str(row.get('content', ''))[:50]}...")
-                
-                evaluation_metrics = container.evaluation_service.evaluate_query_results(
-                    query=req.query,
-                    ctx_df=ctx_df,
-                    use_cache=True
-                )
-                
-                logger.info(f"🔍 DEBUG: evaluation_service returned: {evaluation_metrics is not None}")
-                if evaluation_metrics:
-                    logger.info("✅ Evaluation metrics computed successfully")
-                    logger.info(f"🔍 DEBUG: metrics type = {type(evaluation_metrics)}")
-                else:
-                    logger.error("❌ No evaluation metrics computed - service returned None")
-                    
-            except Exception as e:
-                logger.error(f"❌ Error computing evaluation metrics: {e}")
-                import traceback
-                logger.error(f"❌ Stacktrace: {traceback.format_exc()}")
-                # Continue without evaluation metrics - don't fail the entire request
-        else:
-            if not req.enable_evaluation:
-                logger.info("🔍 Evaluation not requested (enable_evaluation=False)")
-            if not container.evaluation_service:
-                logger.error("❌ No evaluation service in container")
         
         # Create response using the synthesized response
         if hasattr(response, 'model_dump'):
@@ -278,23 +242,8 @@ async def query_endpoint_v2(req: QueryRequest, container: ImmutableContainerDep)
                 "metadata": metadata
             })
         
-        # Compute evaluation metrics if requested
+        # REMOVED: Evaluation metrics computation - evaluation system removed in lean branch
         evaluation_metrics = None
-        if req.enable_evaluation and container.evaluation_service:
-            try:
-                logger.info(f"[v2] Computing evaluation metrics for query: {req.query[:50]}...")
-                evaluation_metrics = container.evaluation_service.evaluate_query_results(
-                    query=req.query,
-                    ctx_df=ctx_df,
-                    use_cache=True
-                )
-                if evaluation_metrics:
-                    logger.info("[v2] Evaluation metrics computed successfully")
-                else:
-                    logger.warning("[v2] No evaluation metrics computed")
-            except Exception as e:
-                logger.warning(f"[v2] Error computing evaluation metrics: {e}")
-                # Continue without evaluation metrics - don't fail the entire request
         
         response_data = {
             "query": req.query,

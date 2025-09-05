@@ -4,19 +4,19 @@ from dataclasses import dataclass
 from typing import Optional
 from core.services.llm_service import LLMFactory
 from core.services.cache_service import CacheService, get_cache_service
-from core.services.evaluation_service import EvaluationService, create_evaluation_service
+# REMOVED: Evaluation service import - evaluation system removed in lean branch
 from core.search.hybrid_search import HybridSearchEngine
 from core.search.bm25_search import BM25SearchEngine
 from core.search.vector_search import VectorSearchEngine
 from core.processors.document_processor import DocumentProcessor, RAGApplication
 from config.settings import HybridSearchConfig
 
-# New clean architecture imports
-from core.services.clean_document_processor import (
+# Clean architecture imports merged into main files
+from core.processors.document_processor import (
     CleanDocumentProcessor, VectorDocumentRepository, 
     BM25IndexBuilder, CleanProcessingOrchestrator
 )
-from core.services.clean_search_engines import CleanSearchEngineFactory
+from core.search.hybrid_search import CleanSearchEngineFactory
 from core.database.vector_store import VectorStore
 
 logger = logging.getLogger(__name__)
@@ -36,14 +36,13 @@ class AppContainer:
     hybrid_engine: Optional[HybridSearchEngine] = None
     llm_factory: Optional[LLMFactory] = None
     cache_service: Optional[CacheService] = None
-    evaluation_service: Optional[EvaluationService] = None
+    # REMOVED: evaluation_service - evaluation system removed in lean branch
 
     def __post_init__(self):
-        """Initialize cache and evaluation services on container creation."""
+        """Initialize cache service on container creation."""
         if self.cache_service is None:
             self.cache_service = get_cache_service()
-        if self.evaluation_service is None:
-            self.evaluation_service = create_evaluation_service(self.cache_service)
+        # REMOVED: evaluation service initialization - evaluation system removed in lean branch
 
     def is_ready(self) -> bool:
         return (
@@ -53,7 +52,7 @@ class AppContainer:
             and self.bm25_engine.retriever is not None
             and self.vector_engine is not None
             and self.cache_service is not None
-            and self.evaluation_service is not None
+            # REMOVED: evaluation service check - evaluation system removed in lean branch
         )
     
     def get_cache_health(self) -> dict:
@@ -80,7 +79,7 @@ class ImmutableAppContainer:
     bm25_engine: BM25SearchEngine
     vector_engine: VectorSearchEngine
     hybrid_engine: HybridSearchEngine
-    evaluation_service: EvaluationService
+    # REMOVED: evaluation_service field - evaluation system removed in lean branch
     
     def is_ready(self) -> bool:
         """Check if all required services are properly initialized."""
@@ -91,7 +90,7 @@ class ImmutableAppContainer:
             and self.bm25_engine.retriever is not None
             and self.vector_engine is not None
             and self.cache_service is not None
-            and self.evaluation_service is not None
+            # REMOVED: evaluation service check - evaluation system removed in lean branch
         )
     
     def get_cache_health(self) -> dict:
@@ -138,7 +137,7 @@ def create_immutable_container(data_dir: str, pg_dsn: str) -> ImmutableAppContai
         # Initialize core services
         cache_service = get_cache_service()
         llm_factory = LLMFactory()
-        evaluation_service = create_evaluation_service(cache_service)
+        # REMOVED: evaluation service creation - evaluation system removed in lean branch
         
         # Initialize search engines
         vector_engine = VectorSearchEngine()
@@ -166,7 +165,7 @@ def create_immutable_container(data_dir: str, pg_dsn: str) -> ImmutableAppContai
             bm25_engine=bm25_engine,
             vector_engine=vector_engine,
             hybrid_engine=hybrid_engine,
-            evaluation_service=evaluation_service,
+            # REMOVED: evaluation service parameter - evaluation system removed in lean branch
         )
         
         logger.info(f"Immutable container created successfully, ready: {container.is_ready()}")

@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List
+from typing import List, Dict, Optional, Any
 import pandas as pd
 import logging
 import time
@@ -10,6 +10,12 @@ from core.search.vector_search import VectorSearchEngine
 from config.settings import HybridSearchConfig
 from core.services.cache_service import get_cache_service
 from core.services.synthesis_service import synthesize_answer
+from core.interfaces.search_engines import (
+    SearchResult, VectorSearchEngine as IVectorSearchEngine, 
+    KeywordSearchEngine as IKeywordSearchEngine,
+    HybridSearchEngine as IHybridSearchEngine, SearchEngineFactory
+)
+from core.database.vector_store import VectorStore
 
 logger = logging.getLogger(__name__)
 
@@ -416,3 +422,388 @@ class HybridSearchEngine:
             logger.error(f"Failed to generate response: {e}")
             # Return ctx_df and None so the caller can handle the synthesis
             return ctx_df, None
+
+
+# Clean interface implementations for better separation of concerns
+
+class CleanVectorSearchEngine(IVectorSearchEngine):
+    """Clean vector search engine - pure search operations."""
+    
+    def __init__(self, vector_store: VectorStore):
+        self.vector_store = vector_store
+        
+    def search(self, query: str, top_k: int = 10, 
+              metadata_filter: Optional[Dict] = None) -> SearchResult:
+        """Perform vector similarity search."""
+        start_time = time.time()
+        
+        try:
+            # Perform vector search
+            search_kwargs = {}
+            if metadata_filter:
+                search_kwargs['metadata_filter'] = metadata_filter
+                
+            results_df = self.vector_store.search(
+                query_text=query,
+                limit=top_k,
+                **search_kwargs
+            )
+            
+            # Convert results to Document objects
+            documents = []
+            for _, row in results_df.iterrows():
+                doc = Document(
+                    page_content=row['content'],
+                    metadata={
+                        'id': row['id'],
+                        'distance': row['distance'],
+                        **{k: v for k, v in row.items() if k not in ['content', 'id', 'distance', 'embedding']}
+                    }
+                )
+                documents.append(doc)
+            
+            processing_time = int((time.time() - start_time) * 1000)
+            
+            return SearchResult(
+                query=query,
+                documents=documents,
+                total_results=len(documents),
+                processing_time_ms=processing_time,
+                metadata={'search_type': 'vector', 'metadata_filter': metadata_filter}
+            )
+            
+        except Exception as e:
+            logger.error(f"Vector search failed: {str(e)}")
+            processing_time = int((time.time() - start_time) * 1000)
+            return SearchResult(
+                query=query,
+                documents=[],
+                total_results=0,
+                processing_time_ms=processing_time,
+                metadata={'error': str(e), 'search_type': 'vector'}
+            )
+    
+    def is_ready(self) -> bool:
+        """Check if vector search engine is ready."""
+        return self.vector_store is not None
+
+
+class CleanKeywordSearchEngine(IKeywordSearchEngine):
+    """Clean BM25 keyword search engine - pure search operations."""
+    
+    def __init__(self, bm25_engine: BM25SearchEngine):
+        self.bm25_engine = bm25_engine
+        
+    def search(self, query: str, top_k: int = 10) -> SearchResult:
+        """Perform keyword-based search."""
+        start_time = time.time()
+        
+        try:
+            if not self.is_ready():
+                raise RuntimeError("BM25 engine not ready - index not built")
+            
+            # Perform BM25 search
+            results_df = self.bm25_engine.search(query, top_k=top_k)
+            
+            # Convert results to Document objects
+            documents = []
+            for _, row in results_df.iterrows():
+                doc = Document(
+                    page_content=row['chunk_enriched'],  # Use enriched content
+                    metadata={
+                        'id': row['uuid_chunk'],
+                        'score': row['bm25_score'],
+                        'file_name': row.get('file_name', ''),
+                        'chunk_index': row.get('chunk_index', 0)
+                    }
+                )
+                documents.append(doc)
+            
+            processing_time = int((time.time() - start_time) * 1000)
+            
+            return SearchResult(
+                query=query,
+                documents=documents,
+                total_results=len(documents),
+                processing_time_ms=processing_time,
+                metadata={'search_type': 'bm25'}
+            )
+            
+        except Exception as e:
+            logger.error(f"BM25 search failed: {str(e)}")
+            processing_time = int((time.time() - start_time) * 1000)
+            return SearchResult(
+                query=query,
+                documents=[],
+                total_results=0,
+                processing_time_ms=processing_time,
+                metadata={'error': str(e), 'search_type': 'bm25'}
+            )
+    
+    def is_ready(self) -> bool:
+        """Check if BM25 search engine is ready."""
+        return (self.bm25_engine is not None and 
+                self.bm25_engine.retriever is not None)
+
+
+class CleanHybridSearchEngine(IHybridSearchEngine):
+    """Clean hybrid search engine combining vector and keyword search."""
+    
+    def __init__(
+        self, 
+        vector_engine: IVectorSearchEngine,
+        keyword_engine: IKeywordSearchEngine,
+        default_vector_weight: float = 0.6
+    ):
+        self.vector_engine = vector_engine
+        self.keyword_engine = keyword_engine
+        self.default_vector_weight = default_vector_weight
+        
+    def search(self, query: str, top_k: int = 10, 
+              vector_weight: Optional[float] = None,
+              rrf_k: Optional[int] = None) -> SearchResult:
+        """Perform hybrid search using Reciprocal Rank Fusion (RRF)."""
+        start_time = time.time()
+        effective_rrf_k = rrf_k if rrf_k is not None else 60
+        
+        logger.info("RRF hybrid search initiated", extra={
+            "query_length": len(query),
+            "query_preview": query[:100] + "..." if len(query) > 100 else query,
+            "top_k": top_k,
+            "rrf_k_value": effective_rrf_k,
+            "search_type": "hybrid_rrf",
+            "fusion_method": "reciprocal_rank_fusion"
+        })
+        
+        try:
+            # Perform both searches
+            vector_result = self.vector_engine.search(query, top_k=top_k)
+            keyword_result = self.keyword_engine.search(query, top_k=top_k)
+            
+            # Combine results using RRF
+            combined_docs = self._document_level_fusion(
+                vector_result.documents,
+                keyword_result.documents,
+                effective_rrf_k,
+                query
+            )
+            
+            # Limit to top_k results
+            combined_docs = combined_docs[:top_k]
+            
+            processing_time = int((time.time() - start_time) * 1000)
+            
+            # Calculate RRF metrics
+            rrf_metrics = self._calculate_rrf_metrics(combined_docs)
+            
+            enhanced_metadata = {
+                'search_type': 'hybrid_rrf',
+                'fusion_method': 'reciprocal_rank_fusion',
+                'rrf_k_value': effective_rrf_k,
+                'vector_results': len(vector_result.documents),
+                'keyword_results': len(keyword_result.documents),
+                **rrf_metrics
+            }
+            
+            return SearchResult(
+                query=query,
+                documents=combined_docs,
+                total_results=len(combined_docs),
+                processing_time_ms=processing_time,
+                metadata=enhanced_metadata
+            )
+            
+        except Exception as e:
+            logger.error("RRF hybrid search failed", extra={
+                "error": str(e),
+                "query_preview": query[:100] + "..." if len(query) > 100 else query,
+                "rrf_k_value": effective_rrf_k,
+            }, exc_info=True)
+            processing_time = int((time.time() - start_time) * 1000)
+            return SearchResult(
+                query=query,
+                documents=[],
+                total_results=0,
+                processing_time_ms=processing_time,
+                metadata={
+                    'error': str(e), 
+                    'search_type': 'hybrid_rrf',
+                    'rrf_k_value': effective_rrf_k
+                }
+            )
+    
+    def get_component_engines(self) -> Dict[str, Any]:
+        """Get underlying search engines for inspection."""
+        return {
+            'vector_engine': self.vector_engine,
+            'keyword_engine': self.keyword_engine
+        }
+    
+    def is_ready(self) -> bool:
+        """Check if both component engines are ready."""
+        return (self.vector_engine.is_ready() and 
+                self.keyword_engine.is_ready())
+    
+    def _document_level_fusion(
+        self, 
+        vector_docs: List[Document], 
+        keyword_docs: List[Document],
+        rrf_k: int = 60,
+        query: str = ""
+    ) -> List[Document]:
+        """Perform RRF-based fusion of search results."""
+        doc_data = {}
+        
+        # Process vector results
+        for rank, doc in enumerate(vector_docs, 1):
+            content_hash = hash(doc.page_content)
+            vector_score = 1.0 / (1.0 + doc.metadata.get('distance', 0))
+            doc_data[content_hash] = {
+                'document': doc,
+                'vector_rank': rank,
+                'keyword_rank': None,
+                'vector_score': vector_score,
+                'keyword_score': 0.0,
+                'content_hash': content_hash
+            }
+        
+        # Process keyword results
+        for rank, doc in enumerate(keyword_docs, 1):
+            content_hash = hash(doc.page_content)
+            keyword_score = doc.metadata.get('score', 0)
+            
+            if content_hash in doc_data:
+                doc_data[content_hash]['keyword_rank'] = rank
+                doc_data[content_hash]['keyword_score'] = keyword_score
+            else:
+                doc_data[content_hash] = {
+                    'document': doc,
+                    'vector_rank': None,
+                    'keyword_rank': rank,
+                    'vector_score': 0.0,
+                    'keyword_score': keyword_score,
+                    'content_hash': content_hash
+                }
+        
+        # Calculate RRF scores and sort
+        scored_docs = []
+        for entry in doc_data.values():
+            rrf_score = self._calculate_rrf_score(
+                entry['vector_rank'], 
+                entry['keyword_rank'],
+                rrf_k
+            )
+            
+            # Determine which engines found this document
+            found_by_engines = []
+            if entry['vector_rank'] is not None:
+                found_by_engines.append("vector")
+            if entry['keyword_rank'] is not None:
+                found_by_engines.append("keyword")
+            
+            # Update document metadata
+            doc = entry['document']
+            doc.metadata.update({
+                'rrf_score': rrf_score,
+                'vector_rank': entry['vector_rank'],
+                'keyword_rank': entry['keyword_rank'],
+                'vector_score': entry['vector_score'],
+                'keyword_score': entry['keyword_score'],
+                'found_by_engines': found_by_engines,
+                'rrf_k_value': rrf_k,
+                'fusion_method': 'reciprocal_rank_fusion'
+            })
+            
+            scored_docs.append((rrf_score, doc))
+        
+        # Sort by RRF score (descending)
+        scored_docs.sort(key=lambda x: x[0], reverse=True)
+        
+        return [doc for _, doc in scored_docs]
+    
+    def _calculate_rrf_score(
+        self, 
+        vector_rank: Optional[int], 
+        keyword_rank: Optional[int],
+        k: int = 60
+    ) -> float:
+        """Calculate Reciprocal Rank Fusion score."""
+        rrf_score = 0.0
+        
+        if vector_rank is not None:
+            rrf_score += 1.0 / (k + vector_rank)
+        
+        if keyword_rank is not None:
+            rrf_score += 1.0 / (k + keyword_rank)
+        
+        return rrf_score
+    
+    def _calculate_rrf_metrics(self, documents: List[Document]) -> Dict[str, Any]:
+        """Calculate RRF-specific metrics for monitoring."""
+        if not documents:
+            return {
+                'engine_agreement_count': 0,
+                'vector_only_count': 0,
+                'keyword_only_count': 0,
+                'avg_rrf_score': 0.0,
+                'top_rrf_score': 0.0
+            }
+        
+        engine_agreement_count = 0
+        vector_only_count = 0
+        keyword_only_count = 0
+        rrf_scores = []
+        
+        for doc in documents:
+            metadata = doc.metadata
+            found_by = metadata.get('found_by_engines', [])
+            rrf_score = metadata.get('rrf_score', 0.0)
+            rrf_scores.append(rrf_score)
+            
+            if len(found_by) > 1:
+                engine_agreement_count += 1
+            elif 'vector' in found_by:
+                vector_only_count += 1
+            elif 'keyword' in found_by:
+                keyword_only_count += 1
+        
+        avg_rrf = sum(rrf_scores) / len(rrf_scores) if rrf_scores else 0.0
+        top_rrf = max(rrf_scores) if rrf_scores else 0.0
+        
+        return {
+            'engine_agreement_count': engine_agreement_count,
+            'vector_only_count': vector_only_count,
+            'keyword_only_count': keyword_only_count,
+            'agreement_percentage': round((engine_agreement_count / len(documents) * 100), 2) if documents else 0,
+            'avg_rrf_score': round(avg_rrf, 6),
+            'top_rrf_score': round(top_rrf, 6)
+        }
+
+
+class CleanSearchEngineFactory(SearchEngineFactory):
+    """Factory for creating clean search engine instances."""
+    
+    def __init__(self, vector_store: VectorStore, bm25_engine: BM25SearchEngine):
+        self.vector_store = vector_store
+        self.bm25_engine = bm25_engine
+        
+    def create_vector_engine(self) -> IVectorSearchEngine:
+        """Create vector search engine instance."""
+        return CleanVectorSearchEngine(self.vector_store)
+    
+    def create_keyword_engine(self) -> IKeywordSearchEngine:
+        """Create keyword search engine instance."""
+        return CleanKeywordSearchEngine(self.bm25_engine)
+    
+    def create_hybrid_engine(
+        self, 
+        vector_engine: IVectorSearchEngine,
+        keyword_engine: IKeywordSearchEngine,
+        vector_weight: float = 0.6
+    ) -> IHybridSearchEngine:
+        """Create hybrid search engine instance."""
+        return CleanHybridSearchEngine(
+            vector_engine, 
+            keyword_engine, 
+            vector_weight
+        )

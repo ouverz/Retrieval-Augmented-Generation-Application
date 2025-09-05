@@ -58,7 +58,7 @@ def get_init_status() -> Dict[str, Any]:
     return make_api_request("/init/status")
 
 
-def query_system(query: str, top_k: int = 8, rrf_k: int = None, session_id: str = None, enable_evaluation: bool = True) -> Dict[str, Any]:
+def query_system(query: str, top_k: int = 8, rrf_k: int = None, session_id: str = None, enable_evaluation: bool = False) -> Dict[str, Any]:
     """Query the RAG system"""
     payload = {"query": query, "top_k": top_k, "enable_evaluation": enable_evaluation}
     if rrf_k is not None:
@@ -107,244 +107,7 @@ def get_quality_emoji(quality: str) -> str:
     return emoji_map.get(quality, "⚪")
 
 
-def display_evaluation_metrics(evaluation_metrics: Dict[str, Any], query_history: List[Dict[str, Any]] = None):
-    """Display evaluation metrics in user-friendly format"""
-    st.markdown('<div class="evaluation-header">📊 How Well Did We Find What You Were Looking For?</div>', unsafe_allow_html=True)
-    
-    # Extract metrics
-    mrr = evaluation_metrics.get("mrr")
-    precision_at_k = evaluation_metrics.get("precision_at_k", {})
-    map_score = evaluation_metrics.get("map_score")
-    recall_at_k = evaluation_metrics.get("recall_at_k", {})
-    ndcg_at_k = evaluation_metrics.get("ndcg_at_k", {})
-    
-    # Main metrics cards
-    cols = st.columns(3)
-    
-    # MRR Card
-    if mrr:
-        with cols[0]:
-            # Handle both enum and string interpretation values
-            interpretation = mrr.get("interpretation", "Fair")
-            if hasattr(interpretation, 'value'):
-                interpretation = interpretation.value
-            quality_color = get_quality_color(interpretation)
-            quality_emoji = get_quality_emoji(interpretation)
-            value = mrr.get('value', 0)
-            progress_width = int(value * 100)
-            description = mrr.get('description', 'Mean Reciprocal Rank')
-            st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-value" style="color: {quality_color};">
-                    {quality_emoji} {value:.3f}
-                </div>
-                <div class="metric-label">Answer Ranking Quality</div>
-                <div class="metric-description">{description}</div>
-                <div class="metric-progress">
-                    <div class="metric-progress-bar" style="width: {progress_width}%; background-color: {quality_color};"></div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            
-    # MAP Card
-    if map_score:
-        with cols[1]:
-            # Handle both enum and string interpretation values
-            interpretation = map_score.get("interpretation", "Fair")
-            if hasattr(interpretation, 'value'):
-                interpretation = interpretation.value
-            quality_color = get_quality_color(interpretation)
-            quality_emoji = get_quality_emoji(interpretation)
-            value = map_score.get('value', 0)
-            progress_width = int(value * 100)
-            description = map_score.get('description', 'Mean Average Precision')
-            st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-value" style="color: {quality_color};">
-                    {quality_emoji} {value:.3f}
-                </div>
-                <div class="metric-label">Overall Search Quality</div>
-                <div class="metric-description">{description}</div>
-                <div class="metric-progress">
-                    <div class="metric-progress-bar" style="width: {progress_width}%; background-color: {quality_color};"></div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-    
-    # Precision@K Card (use most common K value)
-    if precision_at_k:
-        with cols[2]:
-            # Find the most relevant K value (prefer 5, then 3, then 1, then first available)
-            preferred_ks = [5, 3, 1]
-            display_k = None
-            display_precision = None
-            
-            for k in preferred_ks:
-                if k in precision_at_k:  # Check for integer keys first
-                    display_k = k
-                    display_precision = precision_at_k[k]
-                    break
-                elif str(k) in precision_at_k:  # Then check for string keys
-                    display_k = k
-                    display_precision = precision_at_k[str(k)]
-                    break
-            
-            if not display_precision and precision_at_k:
-                # Use first available if preferred not found
-                first_k = list(precision_at_k.keys())[0]
-                display_k = int(first_k) if isinstance(first_k, str) and first_k.isdigit() else first_k
-                display_precision = precision_at_k[first_k]
-                
-            if display_precision:
-                # Handle both enum and string interpretation values
-                interpretation = display_precision.get("interpretation", "Fair")
-                if hasattr(interpretation, 'value'):
-                    interpretation = interpretation.value
-                quality_color = get_quality_color(interpretation)
-                quality_emoji = get_quality_emoji(interpretation)
-                value = display_precision.get('value', 0)
-                progress_width = int(value * 100)
-                description = display_precision.get('description', f'Precision at {display_k}')
-                st.markdown(f"""
-                <div class="metric-card">
-                    <div class="metric-value" style="color: {quality_color};">
-                        {quality_emoji} {value:.3f}
-                    </div>
-                    <div class="metric-label">Top {display_k} Results Accuracy</div>
-                    <div class="metric-description">{description}</div>
-                    <div class="metric-progress">
-                        <div class="metric-progress-bar" style="width: {progress_width}%; background-color: {quality_color};"></div>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-    
-    # Expandable detailed explanations
-    with st.expander("🔍 What Do These Metrics Mean?"):
-        if mrr:
-            st.markdown(f"""
-            **Answer Ranking Quality (MRR: {mrr.get('value', 0):.3f})** {get_quality_emoji(mrr.get('interpretation', 'Fair'))}
-            
-            {mrr.get('description', 'Measures how well we rank the most relevant results first.')}
-            
-            **Your Result:** {mrr.get('interpretation', 'Fair')} - This means the system is performing {mrr.get('interpretation', 'fair').lower()} at putting the best answers first.
-            """)
-            st.markdown("---")
-            
-        if map_score:
-            st.markdown(f"""
-            **Overall Search Quality (MAP: {map_score.get('value', 0):.3f})** {get_quality_emoji(map_score.get('interpretation', 'Fair'))}
-            
-            {map_score.get('description', 'Measures the overall quality of search results across all positions.')}
-            
-            **Your Result:** {map_score.get('interpretation', 'Fair')} - The system's overall search performance is {map_score.get('interpretation', 'fair').lower()}.
-            """)
-            st.markdown("---")
-            
-        if precision_at_k and display_precision:
-            st.markdown(f"""
-            **Top {display_k} Results Accuracy (P@{display_k}: {display_precision.get('value', 0):.3f})** {get_quality_emoji(display_precision.get('interpretation', 'Fair'))}
-            
-            {display_precision.get('description', f'Measures what fraction of the top {display_k} results are actually relevant to your question.')}
-            
-            **Your Result:** {display_precision.get('interpretation', 'Fair')} - {display_precision.get('interpretation', 'Fair')} accuracy in the top results.
-            """)
-    
-    # Additional metrics in collapsible section
-    additional_metrics_available = bool(recall_at_k or ndcg_at_k or len(precision_at_k) > 1)
-    
-    if additional_metrics_available:
-        with st.expander("📈 Additional Performance Metrics"):
-            
-            # Show all Precision@K values
-            if len(precision_at_k) > 1:
-                st.markdown("**Precision at Different Result Counts:**")
-                precision_cols = st.columns(min(len(precision_at_k), 4))
-                for i, (k, p_result) in enumerate(precision_at_k.items()):
-                    if i < len(precision_cols):
-                        with precision_cols[i]:
-                            quality_color = get_quality_color(p_result.get("interpretation", "Fair"))
-                            st.markdown(f"""
-                            <div style="text-align: center; padding: 0.5rem;">
-                                <div style="color: {quality_color}; font-size: 1.2rem; font-weight: bold;">
-                                    {p_result.get('value', 0):.3f}
-                                </div>
-                                <div style="font-size: 0.8rem; color: #a0aec0;">
-                                    Top {k} Results
-                                </div>
-                            </div>
-                            """, unsafe_allow_html=True)
-            
-            # Show Recall@K if available
-            if recall_at_k:
-                st.markdown("---")
-                st.markdown("**Recall at Different Result Counts:**")
-                recall_cols = st.columns(min(len(recall_at_k), 4))
-                for i, (k, r_result) in enumerate(recall_at_k.items()):
-                    if i < len(recall_cols):
-                        with recall_cols[i]:
-                            quality_color = get_quality_color(r_result.get("interpretation", "Fair"))
-                            st.markdown(f"""
-                            <div style="text-align: center; padding: 0.5rem;">
-                                <div style="color: {quality_color}; font-size: 1.2rem; font-weight: bold;">
-                                    {r_result.get('value', 0):.3f}
-                                </div>
-                                <div style="font-size: 0.8rem; color: #a0aec0;">
-                                    Recall@{k}
-                                </div>
-                            </div>
-                            """, unsafe_allow_html=True)
-            
-            # Show NDCG@K if available  
-            if ndcg_at_k:
-                st.markdown("---")
-                st.markdown("**Normalized Discounted Cumulative Gain:**")
-                ndcg_cols = st.columns(min(len(ndcg_at_k), 4))
-                for i, (k, ndcg_result) in enumerate(ndcg_at_k.items()):
-                    if i < len(ndcg_cols):
-                        with ndcg_cols[i]:
-                            quality_color = get_quality_color(ndcg_result.get("interpretation", "Fair"))
-                            st.markdown(f"""
-                            <div style="text-align: center; padding: 0.5rem;">
-                                <div style="color: {quality_color}; font-size: 1.2rem; font-weight: bold;">
-                                    {ndcg_result.get('value', 0):.3f}
-                                </div>
-                                <div style="font-size: 0.8rem; color: #a0aec0;">
-                                    NDCG@{k}
-                                </div>
-                            </div>
-                            """, unsafe_allow_html=True)
-    
-    # Historical metrics tracking
-    if query_history and len(query_history) > 1:
-        with st.expander("📈 Session Performance Trends"):
-            st.markdown("**Performance Over Your Recent Queries:**")
-            
-            # Extract historical data
-            queries = [q['query'][:30] + "..." if len(q['query']) > 30 else q['query'] for q in query_history]
-            confidences = [q.get('confidence', 0) for q in query_history]
-            
-            # Create simple metrics overview
-            avg_confidence = sum(confidences) / len(confidences) if confidences else 0
-            queries_with_context = sum(1 for q in query_history if q.get('enough_context', False))
-            context_percentage = (queries_with_context / len(query_history)) * 100 if query_history else 0
-            
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Avg Confidence", f"{avg_confidence:.2f}", f"{confidences[-1] - avg_confidence:+.2f}" if len(confidences) > 1 else None)
-            with col2:
-                st.metric("Queries This Session", len(query_history))
-            with col3:
-                st.metric("Context Success Rate", f"{context_percentage:.0f}%")
-            
-            # Show recent query list
-            if len(query_history) > 1:
-                st.markdown("**Recent Queries:**")
-                for i, q in enumerate(reversed(query_history[-5:]), 1):  # Show last 5 queries
-                    quality_emoji = "✅" if q.get('enough_context') else "⚠️"
-                    confidence = q.get('confidence', 0)
-                    st.write(f"{i}. {quality_emoji} {q['query'][:50]}... (Confidence: {confidence:.2f})")
-    
-    st.markdown("---")
+# REMOVED: display_evaluation_metrics function - evaluation system removed in lean branch
 
 
 # Streamlit UI
@@ -688,11 +451,8 @@ def main():
             )
         
         with col_eval:
-            show_evaluation = st.checkbox(
-                "Show evaluation metrics",
-                value=True,
-                help="Display performance metrics like MRR, Precision@K, and MAP for query results"
-            )
+            # REMOVED: Evaluation metrics checkbox - evaluation system removed in lean branch
+            show_evaluation = False
 
     # 5. RRF Configuration - COMMENTED OUT FOR NOW
     # st.markdown("### ⚖️ RRF Configuration")
@@ -727,7 +487,7 @@ def main():
             start_time = time.time()
 
             with st.spinner("Searching and synthesizing answer..."):
-                result = query_system(query, top_k=top_k, rrf_k=rrf_k, session_id=st.session_state.get('session_id'), enable_evaluation=show_evaluation)
+                result = query_system(query, top_k=top_k, rrf_k=rrf_k, session_id=st.session_state.get('session_id'), enable_evaluation=False)
 
             elapsed_time = time.time() - start_time
 
@@ -735,26 +495,7 @@ def main():
                 data = result["data"]
                 st.success("✅ Query completed successfully!")
 
-                # 6. Store metrics in session history
-                evaluation_metrics = data.get("evaluation_metrics")
-                if evaluation_metrics and show_evaluation:
-                    # Store metrics in session history
-                    if 'query_history' not in st.session_state:
-                        st.session_state.query_history = []
-                    
-                    # Add current query metrics to history
-                    query_entry = {
-                        'query': query,
-                        'timestamp': time.time(),
-                        'evaluation_metrics': evaluation_metrics,
-                        'confidence': data.get("confidence", 0),
-                        'enough_context': data.get("enough_context", False)
-                    }
-                    st.session_state.query_history.append(query_entry)
-                    
-                    # Keep only last 10 queries for performance
-                    if len(st.session_state.query_history) > 10:
-                        st.session_state.query_history = st.session_state.query_history[-10:]
+                # REMOVED: Evaluation metrics session history - evaluation system removed in lean branch
 
                 # 7. Search Results Summary (moved from breakdown expander)
                 if data.get("results_table"):
@@ -842,12 +583,7 @@ def main():
                     </div>
                     """, unsafe_allow_html=True)
 
-                # 10. Evaluation Metrics Display (after Query Performance)
-                evaluation_metrics = data.get("evaluation_metrics")
-                
-                if evaluation_metrics and show_evaluation:
-                    st.markdown("---")  # Separator
-                    display_evaluation_metrics(evaluation_metrics, st.session_state.get('query_history', []))
+                # REMOVED: Evaluation Metrics Display - evaluation system removed in lean branch
 
                 # 11. Additional details (controlled by show_evaluation toggle)
                 if show_evaluation:
