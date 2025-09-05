@@ -16,22 +16,21 @@ The project follows a **clean, layered architecture**:
 - **Streamlit Frontend** (`frontend/streamlit_app.py`): Pure frontend client
   - Makes HTTP requests to FastAPI backend
   - Provides user interface for system initialization and querying
-  - **NEW**: Comprehensive evaluation metrics display (MRR, MAP, Precision@K)
-  - **NEW**: Real-time search quality feedback with visual indicators
-  - **NEW**: Historical query performance tracking and session management
   - Displays search results with hybrid RRF score breakdown
   - No direct document processing or database access
+  - **LEAN BRANCH**: Evaluation metrics system removed for simplified codebase
 
 #### **2. Backend Layer** (`backend/`)
 - **FastAPI Backend**: Core API service handling all RAG operations
   - `backend/main.py`: FastAPI application with health check and routers
-  - `backend/routers/`: API endpoints with **NEW** evaluation integration
-    - `query.py`: **UPDATED** - Now includes real-time evaluation metrics computation
-    - `cache.py`: **UPDATED** - Enhanced cache clearing (query + evaluation caches)
+  - `backend/routers/`: API endpoints for core RAG functionality
+    - `query.py`: Main query endpoint with hybrid search and synthesis
+    - `cache.py`: Cache management endpoints
+    - **LEAN BRANCH**: Evaluation-related functionality removed
     - `init.py`, `ingest.py`: System initialization and document ingestion
   - `backend/schemas/`: Pydantic models for request/response validation
-    - `evaluation.py`: **NEW** - Evaluation metrics response models
     - `query.py`, `common.py`, `ingest.py`: Core data models
+    - **LEAN BRANCH**: Evaluation schemas removed
   - `backend/dependencies.py`: **UPDATED** - Thread-safe dependency injection
   - `backend/container.py`: **UPDATED** - Immutable container pattern for concurrency
 
@@ -44,17 +43,13 @@ The project follows a **clean, layered architecture**:
   - `bm25_search.py`: Keyword search with rank-bm25
   - `hybrid_search.py`: RRF-based hybrid search engine
   - `rrf_fusion.py`: Reciprocal Rank Fusion implementation
-- **Evaluation System** (`core/evaluation/`): **NEW** - IR metrics and assessment
-  - `metrics.py`: Information Retrieval evaluation metrics (MRR, MAP, Precision@K, NDCG@K)
-  - Synthetic relevance judgment algorithm with realistic patterns
-  - Query-dependent evaluation scoring for varied user feedback
+- **REMOVED**: Evaluation System - Lean branch focuses on core RAG functionality
 - **Services** (`core/services/`): Business logic services
-  - `cache_service.py`: Redis caching with evaluation cache support
-  - `evaluation_service.py`: **NEW** - Evaluation metrics computation and caching
+  - `cache_service.py`: Redis caching for queries and embeddings
   - `llm_service.py`: OpenAI LLM factory and management
+  - **LEAN BRANCH**: Evaluation service removed
   - `synthesis_service.py`: Response generation and citation
-  - `clean_document_processor.py`: Clean architecture document processing
-  - `clean_search_engines.py`: Clean architecture search engines
+  - **LEAN BRANCH**: Clean architecture classes consolidated into main files
 - **Database** (`core/database/`): TimescaleDB integration with pgvector
 
 #### **4. Configuration** (`config/`)
