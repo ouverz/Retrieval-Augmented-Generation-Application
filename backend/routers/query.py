@@ -4,7 +4,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional, Dict, Any
 from backend.schemas.query import QueryRequest, QueryResponse
-from backend.dependencies import app_container, ImmutableContainerDep
+from backend.dependencies import app_container
 from backend.container import AppContainer
 from core.services.synthesis_service import synthesize_answer
 
@@ -198,74 +198,3 @@ async def query_endpoint(req: QueryRequest, container: AppContainer = Depends(ap
         raise HTTPException(500, f"Query processing failed: {str(e)}")
 
 
-# NEW THREAD-SAFE QUERY ENDPOINT
-@router.post("/v2", response_model=QueryResponse)
-async def query_endpoint_v2(req: QueryRequest, container: ImmutableContainerDep):
-    """Thread-safe query endpoint using immutable container dependency injection."""
-    try:
-        logger.info(f"[v2] Received query: {req.query[:100]}...")
-        t0 = time.time()
-        
-        # Check service readiness
-        if not container.is_ready():
-            logger.error("[v2] Immutable container not ready")
-            raise HTTPException(412, "Service not initialized. POST /init first.")
-        
-        # Perform hybrid search using immutable container
-        ctx_df, response = await container.hybrid_engine.search(
-            query=req.query, 
-            top_k=req.top_k,
-            rrf_k=req.rrf_k
-        )
-        
-        # Calculate latency
-        latency_ms = int((time.time() - t0) * 1000)
-        
-        # Build simplified results for v2 endpoint
-        results = []
-        for idx, row in ctx_df.iterrows():
-            metadata = row.get("metadata", {})
-            if isinstance(metadata, str):
-                import json
-                try:
-                    metadata = json.loads(metadata) 
-                except:
-                    metadata = {}
-            
-            hybrid_score = round(metadata.get("hybrid_score", metadata.get("score", 0.0)), 4)
-            
-            results.append({
-                "rank": int(idx + 1),
-                "id": str(metadata.get("id", f"doc_{idx}")),
-                "content": row.get("content", "")[:500],
-                "score": hybrid_score,
-                "metadata": metadata
-            })
-        
-        # REMOVED: Evaluation metrics computation - evaluation system removed in lean branch
-        evaluation_metrics = None
-        
-        response_data = {
-            "query": req.query,
-            "results": results,
-            "total_results": len(results),
-            "latency_ms": latency_ms,
-            "answer": response.answer if response else "Response generation failed",
-            "citations": response.citations if response else [],
-            "evaluation_metrics": evaluation_metrics,
-            "config": {
-                "top_k": req.top_k,
-                "rrf_k": req.rrf_k,
-                "container_type": "immutable",
-                "thread_safe": True
-            }
-        }
-        
-        logger.info(f"[v2] Query processed successfully in {latency_ms}ms using thread-safe container")
-        return QueryResponse(**response_data)
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"[v2] Query processing failed: {e}")
-        raise HTTPException(500, f"Query processing failed: {str(e)}")

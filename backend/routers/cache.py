@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from typing import Dict, Any
 from enum import Enum
 
-from backend.dependencies import get_app_container, ImmutableContainerDep
+from backend.dependencies import app_container
 from backend.container import AppContainer
 
 logger = logging.getLogger(__name__)
@@ -21,7 +21,7 @@ class CacheType(str, Enum):
 
 
 @router.get("/stats")
-def get_cache_stats(container: AppContainer = Depends(get_app_container)) -> Dict[str, Any]:
+def get_cache_stats(container: AppContainer = Depends(app_container)) -> Dict[str, Any]:
     """Get detailed cache statistics and health information."""
     try:
         if not container.cache_service:
@@ -39,7 +39,7 @@ def get_cache_stats(container: AppContainer = Depends(get_app_container)) -> Dic
 @router.post("/clear")
 def clear_cache(
     cache_type: CacheType = CacheType.all,
-    container: AppContainer = Depends(get_app_container)
+    container: AppContainer = Depends(app_container)
 ) -> Dict[str, Any]:
     """Clear cache by type (all, embeddings, queries, sessions)."""
     try:
@@ -66,7 +66,7 @@ def clear_cache(
 
 
 @router.get("/health")
-def get_cache_health(container: AppContainer = Depends(get_app_container)) -> Dict[str, Any]:
+def get_cache_health(container: AppContainer = Depends(app_container)) -> Dict[str, Any]:
     """Get cache service health status."""
     try:
         if not container.cache_service:
@@ -93,50 +93,12 @@ def get_cache_health(container: AppContainer = Depends(get_app_container)) -> Di
         }
 
 
-# NEW THREAD-SAFE ENDPOINTS using ImmutableContainerDep
-@router.get("/v2/stats")
-def get_cache_stats_v2(container: ImmutableContainerDep) -> Dict[str, Any]:
-    """Get cache statistics using new thread-safe dependency injection."""
-    try:
-        stats = container.cache_service.get_cache_stats()
-        logger.info("Cache stats retrieved via thread-safe container")
-        return {
-            "stats": stats,
-            "container_type": "immutable",
-            "thread_safe": True,
-            "container_ready": container.is_ready()
-        }
-    except Exception as e:
-        logger.error(f"Failed to get cache stats from immutable container: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get cache stats: {str(e)}")
-
-
-@router.get("/v2/health")  
-def get_cache_health_v2(container: ImmutableContainerDep) -> Dict[str, Any]:
-    """Get cache health using new thread-safe dependency injection."""
-    try:
-        health = container.get_cache_health()
-        return {
-            "health": health,
-            "container_type": "immutable", 
-            "thread_safe": True,
-            "container_ready": container.is_ready(),
-            "immutable": True
-        }
-    except Exception as e:
-        logger.error(f"Failed to check cache health from immutable container: {e}")
-        return {
-            "available": False,
-            "error": str(e),
-            "container_type": "immutable",
-            "thread_safe": True
-        }
 
 
 @router.post("/session")
 def create_session(
     user_id: str = None,
-    container: AppContainer = Depends(get_app_container)
+    container: AppContainer = Depends(app_container)
 ) -> Dict[str, Any]:
     """Create a new user session."""
     try:
@@ -159,7 +121,7 @@ def create_session(
 @router.get("/session/{session_id}")
 def get_session(
     session_id: str,
-    container: AppContainer = Depends(get_app_container)
+    container: AppContainer = Depends(app_container)
 ) -> Dict[str, Any]:
     """Get session data by session ID."""
     try:

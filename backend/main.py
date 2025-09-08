@@ -2,8 +2,9 @@
 import logging
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
-from backend.routers import query, ingest, init, cache, clean_processing
-from backend.dependencies import get_app_container, ImmutableContainerDep
+from backend.routers import query, ingest, init, cache
+from backend.dependencies import app_container
+from fastapi import Depends
 
 # Configure logging
 logging.basicConfig(
@@ -42,10 +43,9 @@ def healthz():
 
 
 @app.get("/health")
-def health():
+def health(container = Depends(app_container)):
     """Detailed health check including cache status."""
     try:
-        container = get_app_container()
         cache_health = container.get_cache_health()
         
         return {
@@ -62,28 +62,6 @@ def health():
         }
 
 
-@app.get("/health/v2")
-def health_v2(container: ImmutableContainerDep):
-    """Thread-safe health check using immutable container."""
-    try:
-        cache_health = container.get_cache_health()
-        
-        return {
-            "status": "ok",
-            "service_ready": container.is_ready(),
-            "container_type": "immutable",
-            "thread_safe": True,
-            "cache": cache_health
-        }
-    except Exception as e:
-        logger.error(f"v2 Health check failed: {e}")
-        return {
-            "status": "error",
-            "error": str(e),
-            "container_type": "immutable",
-            "thread_safe": True,
-            "cache": {"error": "Unable to check cache status"}
-        }
 
 
 @app.on_event("startup")
@@ -107,4 +85,3 @@ app.include_router(init.router, prefix="/init", tags=["init"])
 app.include_router(query.router, prefix="/query", tags=["query"])
 app.include_router(ingest.router, prefix="/ingest", tags=["ingest"])
 app.include_router(cache.router, prefix="/cache", tags=["cache"])
-app.include_router(clean_processing.router)
