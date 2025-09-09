@@ -44,6 +44,9 @@ CLAUDE.md
 .claude/
 .pytest_cache/
 
+# Test directories
+tests/
+
 # Python cache
 __pycache__/
 *.py[cod]
