@@ -47,7 +47,16 @@ CLAUDE.md
 # Test directories
 tests/
 
-# Python cache
-__pycache__/
+# System files
+.DS_Store
+.python-version
+
+# IDE files
+*.code-workspace
+
+# Python cache (comprehensive)
+**/__pycache__/
 *.py[cod]
 *.pyo
+*.pyd
+.Python
