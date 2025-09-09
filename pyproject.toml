@@ -2,7 +2,7 @@
 name = "rag-application"
 version = "0.1.0"
 description = "Production-ready RAG application with TimescaleDB, pgvector, and Redis caching"
-readme = "docs/README.md"
+readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "ipykernel",

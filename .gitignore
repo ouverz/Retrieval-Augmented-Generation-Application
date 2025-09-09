@@ -38,3 +38,13 @@ coverage.xml
 # exclude data from source control by default
 # /data/
 processed_rag_documents.csv
+
+# Claude Code and development artifacts
+CLAUDE.md
+.claude/
+.pytest_cache/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
