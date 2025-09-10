@@ -6,11 +6,14 @@ import glob
 import threading
 import time
 import pandas as pd
-from fastapi import APIRouter, Depends, BackgroundTasks
+from fastapi import APIRouter, Depends, BackgroundTasks, Request
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from backend.schemas.ingest import InitRequest, InitResponse, InitStatusResponse
 from backend.dependencies import app_container, state_store
 from backend.container import AppContainer
 from backend.state_store import StateStore
+from backend.security import require_api_key
 
 from core.processors.document_processor import DocumentProcessor, RAGApplication
 from core.search.vector_search import VectorSearchEngine
@@ -21,6 +24,7 @@ from config.settings import HybridSearchConfig
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+limiter = Limiter(key_func=get_remote_address)
 
 # Global initialization status
 _init_status = {
@@ -67,7 +71,12 @@ def get_init_status():
 
 
 @router.get("/debug")
-def debug_system_state(container: AppContainer = Depends(app_container)):
+@limiter.limit("10/minute")
+def debug_system_state(
+    request: Request,
+    container: AppContainer = Depends(app_container),
+    api_key: str = Depends(require_api_key)
+):
     """Debug endpoint to check system component states"""
     return {
         "container_ready": container.is_ready(),
@@ -165,11 +174,14 @@ def _run_initialization_background(container: AppContainer, dataset_hash: str, s
 
 
 @router.post("", response_model=InitResponse)
+@limiter.limit("2/hour")
 def initialize(
+    request: Request,
     req: InitRequest,
     background_tasks: BackgroundTasks,
     store: StateStore = Depends(state_store),
     container: AppContainer = Depends(app_container),
+    api_key: str = Depends(require_api_key)
 ):
     try:
         # Check if already running

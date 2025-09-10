@@ -1,15 +1,19 @@
 # app/routers/cache.py
 import logging
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from typing import Dict, Any
 from enum import Enum
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from backend.dependencies import app_container
 from backend.container import AppContainer
+from backend.security import require_api_key
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+limiter = Limiter(key_func=get_remote_address)
 
 
 class CacheType(str, Enum):
@@ -21,7 +25,12 @@ class CacheType(str, Enum):
 
 
 @router.get("/stats")
-def get_cache_stats(container: AppContainer = Depends(app_container)) -> Dict[str, Any]:
+@limiter.limit("30/minute")
+def get_cache_stats(
+    request: Request,
+    container: AppContainer = Depends(app_container),
+    api_key: str = Depends(require_api_key)
+) -> Dict[str, Any]:
     """Get detailed cache statistics and health information."""
     try:
         if not container.cache_service:
@@ -37,9 +46,12 @@ def get_cache_stats(container: AppContainer = Depends(app_container)) -> Dict[st
 
 
 @router.post("/clear")
+@limiter.limit("10/hour")
 def clear_cache(
+    request: Request,
     cache_type: CacheType = CacheType.all,
-    container: AppContainer = Depends(app_container)
+    container: AppContainer = Depends(app_container),
+    api_key: str = Depends(require_api_key)
 ) -> Dict[str, Any]:
     """Clear cache by type (all, embeddings, queries, sessions)."""
     try:
@@ -66,7 +78,12 @@ def clear_cache(
 
 
 @router.get("/health")
-def get_cache_health(container: AppContainer = Depends(app_container)) -> Dict[str, Any]:
+@limiter.limit("60/minute")
+def get_cache_health(
+    request: Request,
+    container: AppContainer = Depends(app_container),
+    api_key: str = Depends(require_api_key)
+) -> Dict[str, Any]:
     """Get cache service health status."""
     try:
         if not container.cache_service:
@@ -96,9 +113,12 @@ def get_cache_health(container: AppContainer = Depends(app_container)) -> Dict[s
 
 
 @router.post("/session")
+@limiter.limit("20/hour")
 def create_session(
+    request: Request,
     user_id: str = None,
-    container: AppContainer = Depends(app_container)
+    container: AppContainer = Depends(app_container),
+    api_key: str = Depends(require_api_key)
 ) -> Dict[str, Any]:
     """Create a new user session."""
     try:
@@ -119,9 +139,12 @@ def create_session(
 
 
 @router.get("/session/{session_id}")
+@limiter.limit("60/minute")
 def get_session(
     session_id: str,
-    container: AppContainer = Depends(app_container)
+    request: Request,
+    container: AppContainer = Depends(app_container),
+    api_key: str = Depends(require_api_key)
 ) -> Dict[str, Any]:
     """Get session data by session ID."""
     try:

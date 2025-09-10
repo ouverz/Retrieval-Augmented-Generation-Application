@@ -95,4 +95,15 @@ def get_settings() -> Settings:
     """Create and return a cached instance of the Settings."""
     settings = Settings()
     setup_logging()
+    
+    # Validate required environment variables
+    missing_vars = []
+    if not settings.openai.api_key:
+        missing_vars.append("OPENAI_API_KEY")
+    if not settings.database.service_url:
+        missing_vars.append("TIMESCALE_SERVICE_URL")
+    
+    if missing_vars:
+        raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
+    
     return settings

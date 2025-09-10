@@ -33,4 +33,5 @@ dependencies = [
     "redis[hiredis]>=4.5.0",
     "hiredis>=2.2.0",
     "nltk>=3.8.1",
+    "slowapi>=0.1.9",
 ]

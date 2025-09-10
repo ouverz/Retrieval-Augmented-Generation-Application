@@ -1,11 +1,14 @@
 # app/routers/query.py
 import time
 import logging
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from typing import Optional, Dict, Any
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from backend.schemas.query import QueryRequest, QueryResponse
 from backend.dependencies import app_container
 from backend.container import AppContainer
+from backend.security import require_api_key
 from core.services.synthesis_service import synthesize_answer
 
 # Set up logging
@@ -13,10 +16,17 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+limiter = Limiter(key_func=get_remote_address)
 
 
 @router.post("", response_model=QueryResponse)
-async def query_endpoint(req: QueryRequest, container: AppContainer = Depends(app_container)):
+@limiter.limit("10/minute")
+async def query_endpoint(
+    request: Request,
+    req: QueryRequest, 
+    container: AppContainer = Depends(app_container),
+    api_key: str = Depends(require_api_key)
+):
     try:
         logger.info(f"Received query: {req.query[:100]}...")
         
