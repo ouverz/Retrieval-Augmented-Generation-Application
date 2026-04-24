@@ -1,25 +1,43 @@
-# RAG Application with TimescaleDB & Redis Caching
+# Retrieval-Augmented Generation Application
 
-A production-ready Retrieval-Augmented Generation (RAG) application featuring hybrid search, intelligent caching, and scalable architecture.
+Answer questions grounded in your own documents — not hallucinated from model weights. A production-ready RAG system built with hybrid search, intelligent caching, and a multi-LLM backend.
+
+Built with modern Python AI tooling: **Pydantic AI**, **TimescaleDB + pgvector**, **Redis**, and support for both **OpenAI** and **Anthropic Claude**.
+
+---
+
+## Stack
+
+| Layer | Technology |
+|---|---|
+| AI Framework | Pydantic AI |
+| LLM Providers | OpenAI GPT-4o · Anthropic Claude |
+| Vector Store | TimescaleDB + pgvector |
+| Cache | Redis |
+| Backend | FastAPI |
+| Frontend | Streamlit |
+| Search | Hybrid: BM25 + Vector similarity |
+
+---
 
 ## 🚀 Quick Start
 
 ```bash
 # 1. Clone and navigate to project
-git clone https://github.com/ouverz/RAG-System.git
-cd RAG-System
+git clone https://github.com/ouverz/Retrieval-Augmented-Generation-Application.git
+cd Retrieval-Augmented-Generation-Application
 
 # 2. Install dependencies (choose one method)
 # Option A: Using UV (recommended)
 uv sync
 
-# Option B: Using pip  
+# Option B: Using pip
 pip install -e .
 # OR: pip install -r requirements.txt
 
 # 3. Configure environment
 cp .env.example .env
-# Edit .env and add your OPENAI_API_KEY
+# Edit .env and add your API keys
 
 # 4. Setup NLTK data (one-time setup)
 python scripts/setup_nltk.py
@@ -33,41 +51,58 @@ python start_app.py
 - ⚡ **API**: http://localhost:8000 (FastAPI backend)
 - 📚 **Docs**: http://localhost:8000/docs (API documentation)
 
-## 🏗️ Architecture Overview
+---
+
+## 🏗️ Architecture
 
 ```
 Frontend (Streamlit) → Backend (FastAPI) → Core Logic → Infrastructure
-                                      ↓
-                        [Redis Cache] [TimescaleDB+pgvector] [OpenAI]
+                                       ↓
+                         [Redis Cache] [TimescaleDB+pgvector] [OpenAI / Claude]
 ```
 
 ### Key Components
+
 - **Frontend**: Clean Streamlit interface for document queries
 - **Backend**: FastAPI service with comprehensive API endpoints
 - **Core**: Business logic for document processing and hybrid search
 - **Cache**: Redis-powered caching (99.8% query speedup)
 - **Database**: TimescaleDB with pgvector for scalable vector storage
 
+---
+
 ## ✨ Features
 
-### **Hybrid Search Engine**
+### Hybrid Search Engine
 - **Vector Search**: Semantic similarity via OpenAI embeddings
 - **BM25 Search**: Keyword-based relevance scoring
 - **True Hybrid Fusion**: Intelligent combination of both approaches
 - **Quality Scoring**: Citation-penalty algorithms for better results
 
-### **Performance Optimization**
-- **Redis Caching**: 
+### Performance Optimization
+- **Redis Caching**:
   - 24h embedding cache (90% cost reduction)
   - 1h query result cache (99.8% latency improvement)
   - Session management and user history
 - **Graceful Degradation**: Full functionality even when cache unavailable
 
-### **Production Features**
-- **Structured Responses**: Type-safe API responses with citations
+### Production Features
+- **Structured Responses**: Type-safe API responses with citations (via Pydantic AI)
 - **Health Monitoring**: Comprehensive system health checks
 - **Error Handling**: Robust error recovery and logging
 - **Docker Integration**: One-command infrastructure deployment
+
+---
+
+## 📊 Performance
+
+| Operation | Cold Cache | Warm Cache | Improvement |
+|---|---|---|---|
+| Document Query | 2–5 seconds | 10–50ms | 99.8% |
+| Embedding Generation | 2–3 seconds | Instant | 99.9% |
+| Search Processing | 500ms–2s | 16ms | 98%+ |
+
+---
 
 ## 📁 Project Structure
 
@@ -82,14 +117,17 @@ rag-application/
 │   ├── services/     # Core services
 │   └── database/     # Data layer
 ├── infrastructure/   # Docker & deployment
-├── tests/           # Testing suite
-├── data/            # Document storage
-└── docs/            # Documentation
+├── scripts/          # Setup and utility scripts
+├── data/             # Document storage
+└── docs/             # Documentation
 ```
+
+---
 
 ## ⚙️ Configuration
 
 ### Environment Variables (`.env`)
+
 ```bash
 # Required
 OPENAI_API_KEY=your_openai_api_key_here
@@ -107,39 +145,12 @@ REDIS_PASSWORD=
 - **Search Weights**: 30% BM25 + 70% Vector (configurable)
 - **Cache Policies**: Intelligent TTL management
 
-## 📊 Performance
-
-| Operation | Cold Cache | Warm Cache | Improvement |
-|-----------|------------|------------|-------------|
-| Document Query | 2-5 seconds | 10-50ms | 99.8% |
-| Embedding Generation | 2-3 seconds | Instant | 99.9% |
-| Search Processing | 500ms-2s | 16ms | 98%+ |
+---
 
 ## 🛠️ Development
 
-### Local Development
-```bash
-# Install dependencies (choose your preferred method)
-# Method 1: UV (recommended)
-uv sync
-
-# Method 2: pip with pyproject.toml  
-pip install -e .
-
-# Method 3: pip with requirements.txt
-pip install -r requirements.txt
-
-# Setup NLTK data (one-time)
-python scripts/setup_nltk.py
-
-# Run tests
-pytest tests/
-
-# Start application
-python start_app.py
-```
-
 ### API Usage
+
 ```python
 import requests
 
@@ -147,11 +158,12 @@ import requests
 requests.post("http://localhost:8000/init", json={"force": False})
 
 # Query documents
-response = requests.post("http://localhost:8000/query", 
-                        json={"query": "your question", "top_k": 5})
+response = requests.post("http://localhost:8000/query",
+                         json={"query": "your question", "top_k": 5})
 ```
 
 ### Cache Management
+
 ```bash
 # View cache statistics
 curl http://localhost:8000/cache/stats
@@ -162,6 +174,8 @@ curl -X POST http://localhost:8000/cache/clear?cache_type=embeddings
 # Health check
 curl http://localhost:8000/cache/health
 ```
+
+---
 
 ## 🎯 Common Operations
 
@@ -175,14 +189,7 @@ curl http://localhost:8000/cache/health
 - Adjust cache TTL settings in Redis configuration
 - Update embedding models and LLM preferences
 
-### Deployment
-```bash
-# Production deployment requires TimescaleDB and Redis
-# See docs/ARCHITECTURE.md for detailed deployment instructions
-
-# For local development, you can use Docker:
-# (Docker setup files not included - setup your own TimescaleDB and Redis instances)
-```
+---
 
 ## 🧪 Testing
 
@@ -196,34 +203,33 @@ pytest tests/integration/   # Integration tests
 pytest tests/validation/    # System validation
 ```
 
+---
+
 ## 🔧 Troubleshooting
 
 ### Common Issues
 
-**1. pgvector not found**
+**pgvector not found**
 ```bash
 docker exec timescaledb psql -U postgres -d postgres -c "CREATE EXTENSION IF NOT EXISTS vector;"
 ```
 
-**2. Redis connection failed**
+**Redis connection failed**
 ```bash
 docker-compose ps  # Check Redis container status
 ```
 
-**3. Import errors after restructure**
+**Import errors after restructure**
 ```bash
 pip install -r requirements.txt  # Reinstall dependencies
 ```
 
-**4. Slow performance**
+**Slow performance**
 - Check Redis cache hit rates via `/cache/stats`
 - Verify OpenAI API key limits
 - Monitor TimescaleDB index status
 
-### Performance Tuning
-- **Cache Optimization**: Adjust TTL values in `config/settings.py`
-- **Search Tuning**: Modify hybrid search weights for your use case
-- **Resource Scaling**: Increase Redis memory or database resources
+---
 
 ## 📖 Documentation
 
@@ -231,27 +237,23 @@ pip install -r requirements.txt  # Reinstall dependencies
 - **[API Documentation](docs/API.md)**: Complete API reference
 - **[NLTK Setup](docs/NLTK_SETUP.md)**: NLTK configuration guide
 
-## 🤝 Contributing
-
-1. **Code Structure**: Follow the established layered architecture
-2. **Testing**: Add tests for new functionality
-3. **Documentation**: Update relevant docs for changes
-4. **Performance**: Consider caching implications for new features
+---
 
 ## 🗺️ Roadmap
 
-- [ ] Multi-modal document support (images, tables)
-- [ ] Advanced search filters and faceting
-- [ ] Distributed caching with Redis Cluster
-- [ ] Metrics and monitoring dashboard
-- [ ] Kubernetes deployment manifests
-
-## 📄 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
+- Multi-modal document support (images, tables)
+- Advanced search filters and faceting
+- Distributed caching with Redis Cluster
+- Metrics and monitoring dashboard
+- Kubernetes deployment manifests
 
 ---
 
-**Built with:** FastAPI • Streamlit • TimescaleDB • Redis • OpenAI • Docker
+## 📄 License
 
-For detailed technical documentation, see [ARCHITECTURE.md](docs/ARCHITECTURE.md).
+MIT License — see LICENSE file for details.
+
+---
+
+Built by [Ofer Kulka](https://www.oferkulka.com) — Senior Data & AI Engineer, Frankfurt am Main.  
+[LinkedIn](https://linkedin.com/in/oferkulka) · [GitHub](https://github.com/ouverz)
