@@ -17,6 +17,8 @@ Built with modern Python AI tooling: **Pydantic AI**, **TimescaleDB + pgvector**
 | Backend | FastAPI |
 | Frontend | Streamlit |
 | Search | Hybrid: BM25 + Vector similarity |
+| Evaluation | RAGAS |
+| Observability | Langfuse |
 
 ---
 
@@ -91,6 +93,28 @@ Frontend (Streamlit) → Backend (FastAPI) → Core Logic → Infrastructure
 - **Health Monitoring**: Comprehensive system health checks
 - **Error Handling**: Robust error recovery and logging
 - **Docker Integration**: One-command infrastructure deployment
+
+### 🧪 RAGAS Quality Evaluation
+
+Automated scoring of every RAG response across four metrics (0.0–1.0 scale):
+
+| Metric | What it measures | Ground truth needed? |
+|--------|-----------------|---------------------|
+| Faithfulness | Answer stays within retrieved context | No |
+| Answer Relevancy | Answer addresses the question | No |
+| Context Precision | Retrieved chunks are relevant to the answer | Yes |
+| Context Recall | All necessary chunks were retrieved | Yes |
+
+Scores are exposed via REST API and a benchmark CLI. Powered by `gpt-4o-mini` as judge — results are LRU-cached to avoid redundant API calls.
+
+```bash
+curl -X POST http://localhost:8000/evaluate \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{"question": "...", "answer": "...", "contexts": ["..."]}'
+```
+
+See **[docs/RAGAS.md](docs/RAGAS.md)** for the full API reference, Python SDK usage, benchmark CLI, and Langfuse integration.
 
 ---
 
@@ -235,17 +259,23 @@ pip install -r requirements.txt  # Reinstall dependencies
 
 - **[Architecture](docs/ARCHITECTURE.md)**: Comprehensive system design
 - **[API Documentation](docs/API.md)**: Complete API reference
+- **[RAGAS Evaluation](docs/RAGAS.md)**: Evaluation API, benchmark CLI, Langfuse integration
 - **[NLTK Setup](docs/NLTK_SETUP.md)**: NLTK configuration guide
 
 ---
 
 ## 🗺️ Roadmap
 
-- Multi-modal document support (images, tables)
-- Advanced search filters and faceting
-- Distributed caching with Redis Cluster
-- Metrics and monitoring dashboard
-- Kubernetes deployment manifests
+- [x] Hybrid search (BM25 + vector + RRF fusion)
+- [x] Redis caching with graceful degradation
+- [x] RAGAS evaluation API and benchmark CLI
+- [x] Langfuse observability integration
+- [x] API key authentication and security headers
+- [ ] Multi-modal document support (images, tables)
+- [ ] Advanced search filters and faceting
+- [ ] Distributed caching with Redis Cluster
+- [ ] Metrics and monitoring dashboard
+- [ ] Kubernetes deployment manifests
 
 ---
 
